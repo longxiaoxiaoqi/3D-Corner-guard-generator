@@ -1,0 +1,4 @@
+interface:
+  display_name: "PCB 护角生成器"
+  short_description: "输入内嵌、夹槽、上下垫高和边长，生成可打印护角模型与三维预览"
+  default_prompt: "使用 $pcb-corner-guard 生成护角：内嵌 2.2 mm，夹槽 4.1 mm，上下各垫高 5 mm，边长 15 mm。"

@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+test-output/
+program/生成的模型/
+.DS_Store
+Thumbs.db
