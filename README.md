@@ -1,4 +1,39 @@
-# PCB 四角护套生成器
+# PCB 与三面护角生成器
+
+**v1.1.0 新增立方体 / 长方体三面护角。** 在窗口中选择结构类型：PCB 模式保留夹槽和上下垫高；三面模式围住一个顶点的三个相邻面，另外三个方向敞开。
+
+[下载最新版程序与技能包](https://github.com/longxiaoxiaoqi/3D-Corner-guard-generator/releases/latest)
+
+## 三面护角：立方体与长方体
+
+![三面护角示意](examples/cuboid/three-face-preview.png)
+
+选择窗口的 **立方体 / 长方体三面护角** 选项卡，设置：
+
+| 参数 | 默认值（mm） | 含义 |
+| --- | ---: | --- |
+| X 方向包覆长度 | 20 | 从物体顶点沿 X 棱延伸的长度 |
+| Y 方向包覆长度 | 20 | 从物体顶点沿 Y 棱延伸的长度 |
+| Z 方向包覆长度 | 20 | 从物体顶点沿 Z 棱延伸的长度 |
+| 壁厚 | 3 | 三个面的共同厚度 |
+
+三条包覆长度可相同或不同，均不包含壁厚，**不是物体的完整长宽高**。外形尺寸为 `(X+壁厚) × (Y+壁厚) × (Z+壁厚)`。仅生成三个相邻面，不生成对面的盖子，也不使用 PCB 的夹槽、内嵌或上下垫高参数。
+
+```powershell
+python program/corner_guard.py --type cuboid --x 20 --y 25 --z 30 --wall 3 --out ./cuboid-model
+```
+
+三面模式输出 `corner_single.stl`、`corner_mirrored.stl` 和 `corner_eight.stl`，以及参数化源文件、离线预览、参数记录和打印说明。八件排版包含四个原件、四个镜像件；当 X/Y/Z 不同时，配合旋转可让八个角的包覆长度保持对应物体轴向。
+
+模型底面朝下打印。每条棱两端的包覆长度之和不能超过物体对应尺寸，否则护角会重叠。该结构没有主动锁扣，需要包装定位。原 PCB 的 3 mm 接触限制不自动用于新物体。
+
+技能调用示例（名称保持兼容）：
+
+> 用 $pcb-corner-guard 生成长方体三面护角：X 包覆 20 mm，Y 包覆 25 mm，Z 包覆 30 mm，壁厚 3 mm。
+
+[下载或查看三面护角示例](examples/cuboid)
+
+## PCB 夹槽护角
 
 输入内嵌深度、夹槽净高、上下垫高和护角边长，生成可用于 3D 打印的 **L 形加厚护角**。四个护角分别套住 PCB 四角，使板的上下两面与外部包装保持距离。
 
@@ -54,7 +89,7 @@ python program/corner_guard.py --gui
 | 文件 | 用途 |
 | --- | --- |
 | `corner_single.stl` | 单个护角，建议先打印试配 |
-| `corner_four.stl` | 四个护角的打印排版 |
+| `corner_four.stl` | PCB 模式四个护角的打印排版 |
 | `corner_parametric.scad` | 可在 OpenSCAD 中修改的参数化源文件 |
 | `preview.html` | 可离线打开的旋转三维预览 |
 | `parameters.json` | 输入参数、外形尺寸与模型检查记录 |
@@ -122,9 +157,10 @@ Copy-Item -Recurse -Path ./skills/pcb-corner-guard -Destination $skillBase
 ## 仓库结构与验证
 
 ```text
-program/                    本地参数窗口与命令行程序
+program/                    两种类型的参数窗口与命令行程序
 skills/pcb-corner-guard/     可复制安装的完整技能
 examples/default/           默认参数示例和装配图
+examples/cuboid/            三面护角示例、八件排版和预览图
 tests/test_generator.py     几何、非法输入及窗口生成测试
 ```
 
@@ -134,6 +170,6 @@ tests/test_generator.py     几何、非法输入及窗口生成测试
 python tests/test_generator.py
 ```
 
-测试覆盖四组尺寸（含不对称上下垫高）、独立截面面积校验、非法数值拒绝及实际窗口生成按钮。测试输出写入已忽略的 `test-output/`。
+测试覆盖四组 PCB 尺寸（含不对称上下垫高）、三组三面护角尺寸、独立截面与体积校验、三向开口检查、镜像与八件排版、非法参数拒绝，以及两个类型的窗口生成按钮。测试输出写入已忽略的 `test-output/`。
 
 程序和技能各自携带生成器，方便单独分发；修改生成逻辑后，请同步 `program/corner_guard.py` 和 `skills/pcb-corner-guard/scripts/corner_guard.py`，同时保持依赖文件一致。

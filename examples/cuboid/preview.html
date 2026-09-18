@@ -1,0 +1,35 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>三面护角模型预览</title><style>
+body{margin:0;background:#f3f6fa;color:#233044;font:16px system-ui,sans-serif}
+main{max-width:1000px;margin:35px auto;padding:0 24px}h1{font-size:26px}
+canvas{display:block;width:100%;height:520px;background:white;border-radius:18px;touch-action:none}
+p{line-height:1.7}small{color:#596777}button{border:0;border-radius:8px;background:#dce6f2;padding:10px 16px;cursor:pointer}
+</style><main><h1>立方体 / 长方体三面护角</h1><p>三面护角 · X 包覆 20 · Y 包覆 25 · Z 包覆 30 · 壁厚 3 mm</p>
+<canvas id="view" aria-label="可拖动旋转的护角模型"></canvas>
+<p><button id="reset">重置视角</button>　拖动旋转，滚轮缩放。</p>
+<small>X/Y/Z 为沿物体三条棱的包覆长度，不含壁厚；三个相邻面封闭，对向全部开口。先打印单件试配。</small></main>
+<script>
+const mesh={"v":[[0.0,0.0,0.0],[3.0,3.0,3.0],[0.0,0.0,33.0],[3.0,3.0,33.0],[0.0,28.0,0.0],[3.0,28.0,3.0],[0.0,28.0,33.0],[3.0,28.0,33.0],[23.0,0.0,0.0],[23.0,3.0,3.0],[23.0,0.0,33.0],[23.0,3.0,33.0],[23.0,28.0,0.0],[23.0,28.0,3.0]],"f":[[0,8,2],[0,4,8],[0,2,6],[2,3,7],[2,10,3],[0,6,4],[4,6,5],[4,5,12],[2,7,6],[6,7,5],[8,9,11],[8,12,9],[2,8,10],[10,11,3],[8,11,10],[4,12,8],[12,5,13],[12,13,9],[1,7,3],[1,3,11],[1,5,7],[1,13,5],[1,11,9],[1,9,13]]},canvas=document.getElementById('view'),ctx=canvas.getContext('2d');
+let a=.78,b=-.45,zoom=1,drag=null;
+const lo=[0,1,2].map(i=>Math.min(...mesh.v.map(v=>v[i]))),hi=[0,1,2].map(i=>Math.max(...mesh.v.map(v=>v[i])));
+const center=lo.map((n,i)=>(n+hi[i])/2),extent=Math.max(...hi.map((n,i)=>n-lo[i]));
+function render(){
+ const r=canvas.getBoundingClientRect(),d=devicePixelRatio||1;canvas.width=r.width*d;canvas.height=r.height*d;ctx.scale(d,d);
+ const s=Math.min(r.width,r.height)*.55/extent*zoom;
+ const points=mesh.v.map(v=>{let x=v[0]-center[0],y=v[1]-center[1],z=v[2]-center[2];
+ let u=Math.cos(a)*x-Math.sin(a)*y,t=Math.sin(a)*x+Math.cos(a)*y;
+ return [u,Math.sin(b)*t+Math.cos(b)*z,Math.cos(b)*t-Math.sin(b)*z];});
+ const faces=mesh.f.map(f=>({f,z:f.reduce((n,i)=>n+points[i][2],0)/3})).sort((x,y)=>x.z-y.z);
+ for(const {f} of faces){const p=f.map(i=>points[i]);let u=p[1].map((n,i)=>n-p[0][i]),v=p[2].map((n,i)=>n-p[0][i]);
+ const n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]],len=Math.hypot(...n)||1;
+ const light=.6+.4*Math.abs((n[0]*.3+n[1]*.5+n[2]*.8)/len);
+ ctx.beginPath();p.forEach((q,i)=>ctx[i?'lineTo':'moveTo'](r.width/2+q[0]*s,r.height/2-q[1]*s));ctx.closePath();
+ ctx.fillStyle=`rgb(${Math.round(239*light)},${Math.round(163*light)},${Math.round(63*light)})`;ctx.fill();ctx.strokeStyle='#65543b';ctx.lineWidth=.4;ctx.stroke();}
+}
+canvas.onpointerdown=e=>{drag=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId)};
+canvas.onpointermove=e=>{if(!drag)return;a+=(e.clientX-drag[0])*.01;b-=(e.clientY-drag[1])*.01;drag=[e.clientX,e.clientY];render()};
+canvas.onpointerup=canvas.onpointercancel=()=>drag=null;
+canvas.onwheel=e=>{e.preventDefault();zoom=Math.max(.3,Math.min(3,zoom*Math.exp(-e.deltaY*.001)));render()};
+document.getElementById('reset').onclick=()=>{a=.78;b=-.45;zoom=1;render()};window.onresize=render;render();
+</script></html>

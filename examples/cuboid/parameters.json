@@ -1,0 +1,24 @@
+{
+  "units": "mm",
+  "type": "cuboid",
+  "parameters": {
+    "x": 20.0,
+    "y": 25.0,
+    "z": 30.0,
+    "wall": 3.0
+  },
+  "outer_dimensions_mm": [
+    23.0,
+    28.0,
+    33.0
+  ],
+  "volume_mm3": 6252.0,
+  "single_closed": true,
+  "pack_closed": true,
+  "pack_count": 8,
+  "components": [
+    1,
+    8
+  ],
+  "physically_print_tested": false
+}

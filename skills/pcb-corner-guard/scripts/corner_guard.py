@@ -42,7 +42,39 @@ class Parameters:
             raise ValueError('护角边长必须大于内嵌深度。')
 
 
+@dataclass(frozen=True)
+class CuboidParameters:
+    x: float = 20.0
+    y: float = 20.0
+    z: float = 20.0
+    wall: float = 3.0
+
+    def validate(self):
+        for key,value in asdict(self).items():
+            if not math.isfinite(value) or not 0.2 <= value <= 1000:
+                raise ValueError(f'{key} 必须是 0.2～1000 mm 之间的有限数值。')
+
+
+def build_cuboid(p):
+    p.validate()
+    import numpy as np
+    import manifold3d as m
+    import trimesh
+    w=p.wall
+    # Three perpendicular plates only: negative-X, negative-Y, negative-Z.
+    # The positive ends remain fully open, with no opposing faces or lid.
+    body=m.Manifold.cube((p.x+w,p.y+w,p.z+w))
+    body-=m.Manifold.cube((p.x+1,p.y+1,p.z+1)).translate((w,w,w))
+    raw=body.to_mesh()
+    mesh=trimesh.Trimesh(vertices=np.asarray(raw.vert_properties)[:,:3],faces=np.asarray(raw.tri_verts),process=True)
+    check(mesh,1)
+    if not np.allclose(mesh.extents,[p.x+w,p.y+w,p.z+w],atol=.0001,rtol=0):
+        raise RuntimeError('三面护角尺寸检查失败。')
+    return mesh
+
+
 def build(p):
+    if isinstance(p,CuboidParameters):return build_cuboid(p)
     p.validate()
     import numpy as np
     import manifold3d as m
@@ -81,6 +113,23 @@ def check(mesh, components):
 
 
 def scad_source(p):
+    if isinstance(p,CuboidParameters):
+        return '// Cuboid three-face guard. Units: mm. Lengths exclude wall.\n' + '\n'.join(f'{k}={v:g};' for k,v in asdict(p).items()) + '''
+mode="single"; // "single", "mirrored", "eight"
+assert(min(x,y,z,wall)>=0.2);
+module corner() {
+    difference() {
+        cube([x+wall,y+wall,z+wall]);
+        translate([wall,wall,wall]) cube([x+1,y+1,z+1]);
+    }
+}
+module reflected() { translate([x+wall,0,0]) mirror([1,0,0]) corner(); }
+if(mode=="single") corner();
+if(mode=="mirrored") reflected();
+if(mode=="eight") for(row=[0:1]) for(col=[0:3])
+    translate([col*(x+wall+6),row*(y+wall+6),0])
+        if(col%2==0) corner(); else reflected();
+'''
     header = '// Millimetres. arm = length along each PCB edge, excluding wall.\n'
     header += '\n'.join(f'{k} = {v:g};' for k,v in asdict(p).items())
     return header + '''
@@ -119,7 +168,9 @@ if(mode=="four") for(x=[0,arm+wall+6]) for(y=[0,arm+wall+6])
 
 def preview_html(p, mesh):
     data = json.dumps({'v':mesh.vertices.round(5).tolist(),'f':mesh.faces.tolist()}, separators=(',',':'))
-    text = f'内嵌 {p.overlap:g} · 夹槽 {p.slot:g} · 上垫高 {p.top:g} · 下垫高 {p.bottom:g} · 边长 {p.arm:g} mm'
+    text = (f'三面护角 · X 包覆 {p.x:g} · Y 包覆 {p.y:g} · Z 包覆 {p.z:g} · 壁厚 {p.wall:g} mm'
+            if isinstance(p,CuboidParameters) else
+            f'内嵌 {p.overlap:g} · 夹槽 {p.slot:g} · 上垫高 {p.top:g} · 下垫高 {p.bottom:g} · 边长 {p.arm:g} mm')
     template = '''<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PCB 护角模型预览</title><style>
@@ -155,6 +206,8 @@ canvas.onpointerup=canvas.onpointercancel=()=>drag=null;
 canvas.onwheel=e=>{e.preventDefault();zoom=Math.max(.3,Math.min(3,zoom*Math.exp(-e.deltaY*.001)));render()};
 document.getElementById('reset').onclick=()=>{a=.78;b=-.45;zoom=1;render()};window.onresize=render;render();
 </script></html>'''
+    if isinstance(p,CuboidParameters):
+        template=template.replace('PCB 护角模型预览','三面护角模型预览').replace('PCB 四角护套','立方体 / 长方体三面护角').replace('边长指沿 PCB 每条边的延伸长度，不含外侧壁厚。此处显示单个护角，不含 PCB 和包装。先打印单件试配。','X/Y/Z 为沿物体三条棱的包覆长度，不含壁厚；三个相邻面封闭，对向全部开口。先打印单件试配。')
     return template.replace('__TEXT__',text).replace('__DATA__',data)
 
 
@@ -164,26 +217,52 @@ def generate(p, destination):
     import numpy as np
     destination = Path(destination).expanduser().resolve()
     destination.mkdir(parents=True,exist_ok=True)
-    stride = p.arm + p.wall + 6
+    cuboid=isinstance(p,CuboidParameters)
+    stride_x=(p.x if cuboid else p.arm)+p.wall+6
+    stride_y=(p.y if cuboid else p.arm)+p.wall+6
+    mirrored=None
+    if cuboid:
+        mirrored=mesh.copy();mirrored.apply_scale([-1,1,1])
+        mirrored.apply_translation(-mirrored.bounds[0]);check(mirrored,1)
+    count=8 if cuboid else 4
     parts = []
-    for x,y in [(0,0),(stride,0),(0,stride),(stride,stride)]:
-        piece=mesh.copy(); piece.apply_translation((x,y,0)); parts.append(piece)
+    for index in range(count):
+        cols=4 if cuboid else 2
+        piece=(mirrored if cuboid and index%2 else mesh).copy()
+        piece.apply_translation(((index%cols)*stride_x,(index//cols)*stride_y,0));parts.append(piece)
     plate=trimesh.util.concatenate(parts)
-    check(plate,4)
-    for name,obj,count in [('corner_single.stl',mesh,1),('corner_four.stl',plate,4)]:
+    check(plate,count)
+    exports=[('corner_single.stl',mesh,1),('corner_eight.stl' if cuboid else 'corner_four.stl',plate,count)]
+    if cuboid:exports.append(('corner_mirrored.stl',mirrored,1))
+    for name,obj,components in exports:
         path=destination/name
         obj.export(path)
         reread=trimesh.load_mesh(path)
-        check(reread,count)
+        check(reread,components)
         if not np.allclose(reread.extents,obj.extents,atol=.001,rtol=0):
             raise RuntimeError('导出尺寸校验失败。')
     (destination/'corner_parametric.scad').write_text(scad_source(p),encoding='utf-8')
     (destination/'preview.html').write_text(preview_html(p,mesh),encoding='utf-8')
-    report={'units':'mm','parameters':asdict(p),'outer_dimensions_mm':mesh.extents.tolist(),
-            'volume_mm3':float(mesh.volume),'single_closed':True,'four_closed':True,
-            'components':[1,4],'physically_print_tested':False}
+    report={'units':'mm','type':'cuboid' if cuboid else 'pcb','parameters':asdict(p),'outer_dimensions_mm':mesh.extents.tolist(),
+            'volume_mm3':float(mesh.volume),'single_closed':True,'pack_closed':True,
+            'pack_count':count,'components':[1,count],'physically_print_tested':False}
+    if not cuboid:report['four_closed']=True
     (destination/'parameters.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
-    note=f'''PCB 护角打印说明（单位：mm）
+    if cuboid:
+        note=f'''立方体 / 长方体三面护角（单位：mm）
+X 包覆长度 {p.x:g}；Y 包覆长度 {p.y:g}；Z 包覆长度 {p.z:g}；壁厚 {p.wall:g}。
+外形 {p.x+p.wall:g} × {p.y+p.wall:g} × {p.z+p.wall:g}。
+仅有一个顶点相邻的三个互相垂直的面，其余方向敞开。包覆长度不含壁厚，不是物体的完整长宽高。
+没有 PCB 夹槽、上下夹持唇边或自动添加的配合间隙；三个内壁直接贴近物体相邻表面。
+corner_single.stl 是单件；corner_mirrored.stl 是镜像件；corner_eight.stl 为四个原件和四个镜像件。
+当 X/Y/Z 不同时，使用镜像件并适当旋转，才能在八个顶点保持包覆长度与物体轴向一致。
+每条棱两端包覆长度之和不应超过物体对应尺寸，否则相邻护角会重叠。
+底面朝下导入切片软件，单位毫米、100% 比例；八件排版可能超出打印平台，可在切片软件重新排布。
+先打印单件验证贴合。运输包装需定位，防止滑脱。该模型未做实物打印、承载或运输测试。
+preview.html 为单件离线三维预览；corner_parametric.scad 可修改并重新导出。
+'''
+    else:
+        note=f'''PCB 护角打印说明（单位：mm）
 
 内嵌深度：{p.overlap:g}；夹槽：{p.slot:g}；上垫高：{p.top:g}；下垫高：{p.bottom:g}。
 护角边长：{p.arm:g}；外侧壁厚：{p.wall:g}。
@@ -208,11 +287,13 @@ corner_parametric.scad 是可编辑源文件；preview.html 可离线打开、�
 def gui():
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox
-    root=tk.Tk(); root.title('PCB 护角模型生成器'); root.geometry('690x620'); root.minsize(650,600)
+    root=tk.Tk(); root.title('护角模型生成器 v1.1'); root.geometry('720x720'); root.minsize(700,700)
     outer=ttk.Frame(root,padding=24); outer.pack(fill='both',expand=True)
-    ttk.Label(outer,text='PCB 护角模型生成器',font=('Microsoft YaHei UI',18,'bold')).pack(anchor='w')
-    ttk.Label(outer,text='输入毫米尺寸，一次生成单件和四件排版 STL。').pack(anchor='w',pady=(8,16))
-    form=ttk.Frame(outer); form.pack(fill='x')
+    ttk.Label(outer,text='护角模型生成器',font=('Microsoft YaHei UI',18,'bold')).pack(anchor='w')
+    ttk.Label(outer,text='选择结构类型，输入毫米尺寸，生成 STL 和可旋转预览。').pack(anchor='w',pady=(8,16))
+    notebook=ttk.Notebook(outer);notebook.pack(fill='x')
+    form=ttk.Frame(notebook,padding=12);notebook.add(form,text='PCB 夹槽护角')
+    cubeform=ttk.Frame(notebook,padding=12);notebook.add(cubeform,text='立方体 / 长方体三面护角')
     fields={}
     spec=[('overlap','内嵌深度','覆盖 PCB 边缘的宽度'),('slot','夹槽高度','槽的净高，已包含你需要的间隙'),
           ('top','上垫高','从夹槽上表面向上'),('bottom','下垫高','从夹槽下表面向下'),
@@ -222,13 +303,25 @@ def gui():
         var=tk.StringVar(value=f'{getattr(Parameters(),key):g}'); fields[key]=var
         ttk.Entry(form,textvariable=var,width=12).grid(row=row,column=1,padx=14)
         ttk.Label(form,text=hint).grid(row=row,column=2,sticky='w')
+    cubefields={}
+    for row,(key,label) in enumerate([('x','X 方向包覆长度'),('y','Y 方向包覆长度'),('z','Z 方向包覆长度'),('wall','三个面的壁厚')]):
+        ttk.Label(cubeform,text=label+' (mm)').grid(row=row,column=0,sticky='w',pady=7)
+        var=tk.StringVar(value=f'{getattr(CuboidParameters(),key):g}');cubefields[key]=var
+        ttk.Entry(cubeform,textvariable=var,width=12).grid(row=row,column=1,padx=14)
+    ttk.Label(cubeform,text='三个相邻面围住顶点，其余方向敞开。\n包覆长度不含壁厚，不是物体完整长宽高。\n输出单件、镜像件与八件排版。',wraplength=580).grid(row=4,column=0,columnspan=3,sticky='w',pady=10)
+    def current():
+        cube=notebook.index(notebook.select())==1
+        cls,values=(CuboidParameters,cubefields) if cube else (Parameters,fields)
+        p=cls(**{k:float(v.get()) for k,v in values.items()});p.validate();return p
     dims=tk.StringVar()
     def update(*_):
         try:
-            p=Parameters(**{k:float(v.get()) for k,v in fields.items()});p.validate()
-            dims.set(f'单件外形：{p.arm+p.wall:g} × {p.arm+p.wall:g} × {p.height:g} mm')
+            p=current()
+            size=[p.x+p.wall,p.y+p.wall,p.z+p.wall] if isinstance(p,CuboidParameters) else [p.arm+p.wall,p.arm+p.wall,p.height]
+            dims.set('单件外形：'+' × '.join(f'{v:g}' for v in size)+' mm')
         except ValueError: dims.set('请填写有效尺寸。')
-    for v in fields.values(): v.trace_add('write',update)
+    for v in [*fields.values(),*cubefields.values()]: v.trace_add('write',update)
+    notebook.bind('<<NotebookTabChanged>>',update)
     update();ttk.Label(outer,textvariable=dims).pack(anchor='w',pady=12)
     dest=tk.StringVar(value=str(Path(__file__).resolve().parent/'生成的模型'))
     folder=ttk.Frame(outer);folder.pack(fill='x',pady=8)
@@ -242,10 +335,11 @@ def gui():
     last=[None]
     def run():
         try:
-            p=Parameters(**{k:float(v.get()) for k,v in fields.items()});p.validate()
+            p=current()
             if not dest.get().strip():raise ValueError('请选择输出目录。')
             button.config(state='disabled'); status.set('正在生成并检查模型……');root.update_idletasks()
-            path=Path(dest.get())/datetime.now().strftime('护角_%Y%m%d_%H%M%S_%f')
+            prefix='三面护角_' if isinstance(p,CuboidParameters) else 'PCB护角_'
+            path=Path(dest.get())/(prefix+datetime.now().strftime('%Y%m%d_%H%M%S_%f'))
             generate(p,path);last[0]=path.resolve();status.set(f'已生成并通过封闭性检查：{last[0]}')
             preview.config(state='normal')
         except ImportError:
@@ -260,15 +354,22 @@ def gui():
 
 
 def main():
-    ap=argparse.ArgumentParser(description='生成可打印 PCB 护角 STL，单位为 mm。无参数启动图形窗口。')
+    ap=argparse.ArgumentParser(description='生成 PCB 或立方体/长方体三面护角 STL，单位 mm。无参数启动窗口。')
     ap.add_argument('--gui',action='store_true')
-    for key in asdict(Parameters()):ap.add_argument('--'+key,type=float,default=getattr(Parameters(),key))
+    ap.add_argument('--type',choices=['pcb','cuboid'],default='pcb')
+    for key in sorted(set(asdict(Parameters()))|set(asdict(CuboidParameters()))):
+        ap.add_argument('--'+key,type=float,default=None)
     ap.add_argument('--out',type=Path,help='输出目录；命令行模式必填。已有同名模型文件会更新。')
     args=ap.parse_args()
     if args.gui or len(sys.argv)==1:gui();return
     if args.out is None:ap.error('命令行生成需要 --out 输出目录。')
     try:
-        p=Parameters(**{k:getattr(args,k) for k in asdict(Parameters())})
+        cls=CuboidParameters if args.type=='cuboid' else Parameters
+        valid=asdict(cls())
+        irrelevant=set(asdict(Parameters()))|set(asdict(CuboidParameters()))
+        irrelevant={k for k in irrelevant-set(valid) if getattr(args,k) is not None}
+        if irrelevant:ap.error('当前类型不使用这些参数：'+', '.join(sorted(irrelevant)))
+        p=cls(**{k:getattr(args,k) if getattr(args,k) is not None else v for k,v in valid.items()})
         result=generate(p,args.out)
     except ImportError as exc:ap.exit(2,f'缺少依赖：{exc}。请安装 requirements.txt 中的库。\n')
     except (ValueError,RuntimeError,OSError) as exc:ap.exit(2,f'生成失败：{exc}\n')
