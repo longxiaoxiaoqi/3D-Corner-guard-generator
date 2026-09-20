@@ -65,6 +65,32 @@ assert bad.returncode!=0
 assert not (ROOT/'test-output/invalid').exists()
 print('PASS incompatible CLI parameters rejected')
 
+for index,p in enumerate([g.UCoverParameters(),g.UCoverParameters(width=35,length=80,height=12,base=2,wall=4),g.UCoverParameters(width=.6,length=2,height=.8,base=.2,wall=.3)]):
+    directory=ROOT/'test-output'/f'ucover{index}'
+    report=g.generate(p,directory)
+    mesh=trimesh.load_mesh(directory/'cover_single.stl')
+    expected=p.length*(p.width+2*p.wall)*p.base+2*p.length*p.wall*p.height
+    assert abs(mesh.volume-expected)<.01
+    assert np.allclose(mesh.extents,p.extents,atol=.001)
+    solid=m.Manifold(m.Mesh(np.asarray(mesh.vertices,dtype=np.float32),np.asarray(mesh.faces,dtype=np.uint32)))
+    assert abs(solid.slice(p.base/2).area()-p.length*(p.width+2*p.wall))<.001
+    assert abs(solid.slice(p.base+p.height/2).area()-2*p.length*p.wall)<.001
+    # Probe spans BOTH end openings and the full space between opposing walls.
+    probe=m.Manifold.cube((p.length+2,p.width-.02,p.height+1)).translate((-1,p.wall+.01,p.base+.01))
+    assert (solid^probe).volume()<.0001
+    assert report['type']=='ucover' and report['components']==[1]
+    assert not (directory/'corner_four.stl').exists()
+    print('PASS U cover dimensions, thickness and both openings',index)
+del solid,probe
+for key in ['width','length','height','base','wall']:
+    for value in [0,-1,float('nan'),float('inf')]:
+        try:g.UCoverParameters(**{key:value}).validate()
+        except ValueError:pass
+        else:raise AssertionError(('Invalid U cover input',key,value))
+bad=subprocess.run([sys.executable,str(source),'--type','ucover','--slot','4','--out',str(ROOT/'test-output/invalid-ucover')],capture_output=True)
+assert bad.returncode!=0
+print('PASS invalid U cover inputs and irrelevant parameters rejected')
+
 # Exercise the actual GUI generate button without displaying a desktop window.
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -76,9 +102,9 @@ def smoke(root):
             yield from widgets(child)
     items=list(widgets(root))
     entries=[x for x in items if isinstance(x,ttk.Entry)]
-    assert len(entries)==11
+    assert len(entries)==16
     entries[-1].delete(0,'end');entries[-1].insert(0,str(ROOT/'test-output/gui'))
-    button=next(x for x in items if isinstance(x,ttk.Button) and x.cget('text')=='生成护角模型')
+    button=next(x for x in items if isinstance(x,ttk.Button) and x.cget('text')=='生成模型')
     preview=next(x for x in items if isinstance(x,ttk.Button) and x.cget('text')=='打开 3D 预览')
     messagebox.showerror=lambda title,message:(_ for _ in ()).throw(AssertionError(message))
     button.invoke()
@@ -90,6 +116,9 @@ def smoke(root):
     entries[0].delete(0,'end');entries[0].insert(0,'invalid')
     button.invoke()
     assert list((ROOT/'test-output/gui').glob('*/corner_eight.stl'))
+    notebook.select(2)
+    button.invoke()
+    assert list((ROOT/'test-output/gui').glob('*/cover_single.stl'))
     root.destroy()
 tk.Tk.mainloop=smoke
 g.gui()

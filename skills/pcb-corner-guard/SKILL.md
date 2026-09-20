@@ -1,9 +1,9 @@
 ---
 name: pcb-corner-guard
-description: 生成可打印的 PCB 夹槽护角或立方体/长方体三面护角，按包覆长度、槽高和壁厚等参数输出 STL、参数化源文件与离线三维预览。适用于这两类护角的生成及尺寸修改。
+description: 按尺寸生成可打印的 PCB 夹槽护角、立方体或长方体三面护角、两端开口 U 形盖板，输出 STL、参数化源文件与离线三维预览。适用于这三类结构的生成及尺寸修改。
 ---
 
-# PCB 与三面护角
+# PCB 护角、三面护角与 U 形盖板
 
 使用 `scripts/corner_guard.py` 确定性生成模型，不要为每次尺寸修改重新编写几何算法。脚本支持命令行及 `--gui` 本地参数窗口，无需 OpenSCAD 即可输出 STL。
 
@@ -11,7 +11,22 @@ description: 生成可打印的 PCB 夹槽护角或立方体/长方体三面护�
 
 - PCB、薄板上下夹持：`--type pcb`（兼容旧命令，默认）。
 - 正方体、立方体、长方体、箱体三面护角：`--type cuboid`。只有一个顶点相邻的三个垂直面，其余方向敞开，不添加相对面或盖子。
+- 两侧开口盖板、U 形盖板：`--type ucover`。一块平板加两条相对侧壁，沿长度方向两端开口，不能误做成三面护角。
 - 用户已指明物体类型时直接选择，无需重复确认。
+
+## U 形盖板参数
+
+`--width 100 --length 120 --height 15 --base 3 --wall 3`：内宽、长度、侧壁内高、平板厚度、侧壁厚度，单位 mm。
+
+- 内宽是两侧壁内表面的净距离；侧壁内高从平板内表面量起；不自动增加装配间隙。
+- 长度沿侧壁方向，表示两开口间距离。外形为 `length × (width+2*wall) × (height+base)`。
+- 两侧壁等高等厚，不包含端墙、盖子、孔或卡扣。不支持直接传入不等高参数；如果用户要求，应先扩展生成器，不能声称当前模型已支持。
+
+```text
+python <skill目录>/scripts/corner_guard.py --type ucover --width 100 --length 120 --height 15 --base 3 --wall 3 --out <当前任务输出目录>/ucover
+```
+
+输出 `cover_single.stl`、`cover_parametric.scad`、`preview.html`、`parameters.json` 和 `打印说明.txt`。盖板不自动生成护角排版。平板外表面朝下打印；确认打印平台尺寸和物体装配余量。
 
 ## 三面护角参数
 

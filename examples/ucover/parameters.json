@@ -1,0 +1,22 @@
+{
+  "units": "mm",
+  "type": "ucover",
+  "parameters": {
+    "width": 100.0,
+    "length": 120.0,
+    "height": 15.0,
+    "base": 3.0,
+    "wall": 3.0
+  },
+  "outer_dimensions_mm": [
+    120.0,
+    106.0,
+    18.0
+  ],
+  "volume_mm3": 48960.0,
+  "single_closed": true,
+  "components": [
+    1
+  ],
+  "physically_print_tested": false
+}

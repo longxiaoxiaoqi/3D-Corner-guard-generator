@@ -1,4 +1,36 @@
-# PCB 与三面护角生成器
+# 护角与 U 形盖板生成器
+
+**v1.2.0 新增 U 形盖板**，程序现有 PCB 夹槽护角、立方体 / 长方体三面护角、U 形盖板三种类型。
+
+## U 形盖板：两端开口
+
+![U 形盖板示例](examples/ucover/ucover-preview.png)
+
+窗口中选择 **U 形盖板**，输入以下参数（单位 mm）：
+
+| 参数 | 命令行参数 | 默认值 | 定义 |
+| --- | --- | ---: | --- |
+| 内宽 W | `--width` | 100 | 两条侧壁内表面之间的净距离 |
+| 长度 L | `--length` | 120 | 沿侧壁方向，两开口之间的距离 |
+| 侧壁内高 H | `--height` | 15 | 从平板内表面到侧壁顶部 |
+| 平板厚度 T | `--base` | 3 | 中间平板的厚度 |
+| 侧壁厚度 S | `--wall` | 3 | 两条侧壁的共同厚度 |
+
+外形尺寸为 **L × (W+2S) × (H+T)**。结构仅含一块平板及两条相对侧壁，长度方向两端敞开；内宽与内高不自动增加装配间隙。当前两条侧壁等高、等厚，不含孔、卡扣或端墙。
+
+```powershell
+python program/corner_guard.py --type ucover --width 100 --length 120 --height 15 --base 3 --wall 3 --out ./ucover-model
+```
+
+输出 `cover_single.stl`、`cover_parametric.scad`、离线 `preview.html`、参数记录及打印说明。不自动生成四件或八件护角排版。
+
+技能调用示例：
+
+> 用 $pcb-corner-guard 生成 U 形盖板：内宽 100 mm、长度 120 mm、侧壁内高 15 mm、平板厚度 3 mm、侧壁厚度 3 mm。
+
+平板外表面朝下打印。确认外形尺寸适合打印平台；套住物体时需在给定内宽、内高中考虑装配间隙。
+
+[查看 U 形盖板示例文件](examples/ucover)
 
 **v1.1.0 新增立方体 / 长方体三面护角。** 在窗口中选择结构类型：PCB 模式保留夹槽和上下垫高；三面模式围住一个顶点的三个相邻面，另外三个方向敞开。
 
@@ -157,10 +189,11 @@ Copy-Item -Recurse -Path ./skills/pcb-corner-guard -Destination $skillBase
 ## 仓库结构与验证
 
 ```text
-program/                    两种类型的参数窗口与命令行程序
+program/                    三种类型的参数窗口与命令行程序
 skills/pcb-corner-guard/     可复制安装的完整技能
 examples/default/           默认参数示例和装配图
 examples/cuboid/            三面护角示例、八件排版和预览图
+examples/ucover/            两端开口 U 形盖板示例和预览图
 tests/test_generator.py     几何、非法输入及窗口生成测试
 ```
 
@@ -170,6 +203,6 @@ tests/test_generator.py     几何、非法输入及窗口生成测试
 python tests/test_generator.py
 ```
 
-测试覆盖四组 PCB 尺寸（含不对称上下垫高）、三组三面护角尺寸、独立截面与体积校验、三向开口检查、镜像与八件排版、非法参数拒绝，以及两个类型的窗口生成按钮。测试输出写入已忽略的 `test-output/`。
+测试覆盖四组 PCB 尺寸、三组三面护角尺寸、三组 U 形盖板尺寸；包括独立截面与体积、三面护角三向开口、盖板两端开口与厚度、镜像排版、非法参数，以及三个类型的窗口生成按钮。测试输出写入已忽略的 `test-output/`。
 
 程序和技能各自携带生成器，方便单独分发；修改生成逻辑后，请同步 `program/corner_guard.py` 和 `skills/pcb-corner-guard/scripts/corner_guard.py`，同时保持依赖文件一致。
