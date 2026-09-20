@@ -11,9 +11,10 @@ environment={key:value for key,value in os.environ.items()
              if not key.upper().startswith('PYTHON') and key.upper() not in ('TCL_LIBRARY','TK_LIBRARY','VIRTUAL_ENV')}
 environment['PATH']=str(Path(os.environ['SystemRoot'])/'System32')
 with tempfile.TemporaryDirectory(prefix='cover-frozen-') as folder:
-    for kind in ['pcb','cuboid','ucover','closedcover','circle','rectangle','square']:
+    for kind in ['pcb','cuboid','ucover','closedcover','circle','rectangle','square','roundcover']:
         destination=Path(folder)/('中文输出_'+kind)
-        result=subprocess.run([str(exe),'--type',kind,'--out',str(destination)],env=environment,timeout=90)
+        extras=['--opening_chamfer','1','--outer_radius','2','--inner_radius','2'] if kind=='roundcover' else []
+        result=subprocess.run([str(exe),'--type',kind,*extras,'--out',str(destination)],env=environment,timeout=90)
         assert result.returncode==0,(kind,result.returncode)
         report=json.loads((destination/'parameters.json').read_text(encoding='utf-8'))
         assert report['type']==kind

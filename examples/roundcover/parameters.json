@@ -1,0 +1,27 @@
+{
+  "units": "mm",
+  "type": "roundcover",
+  "parameters": {
+    "diameter": 100.0,
+    "height": 15.0,
+    "base": 3.0,
+    "wall": 3.0,
+    "opening_chamfer": 1.0,
+    "outer_radius": 2.0,
+    "inner_radius": 2.0
+  },
+  "outer_dimensions_mm": [
+    106.0,
+    106.0,
+    18.0
+  ],
+  "opening_diameter_mm": 102.0,
+  "inner_flat_diameter_mm": 96.0,
+  "straight_wall_height_mm": 12.0,
+  "single_closed": true,
+  "components": [
+    1
+  ],
+  "volume_mm3": 40844.38851827418,
+  "physically_print_tested": false
+}

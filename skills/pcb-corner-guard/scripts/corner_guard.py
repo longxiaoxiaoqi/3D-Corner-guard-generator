@@ -82,6 +82,140 @@ class ClosedCoverParameters(UCoverParameters):
 
 
 @dataclass(frozen=True)
+class RoundCoverParameters:
+    diameter: float = 100.
+    height: float = 15.
+    base: float = 3.
+    wall: float = 3.
+    opening_chamfer: float = 0.
+    outer_radius: float = 0.
+    inner_radius: float = 0.
+
+    @property
+    def extents(self):
+        return [self.diameter+2*self.wall]*2+[self.height+self.base]
+
+    def validate(self):
+        labels = dict(diameter='内径 D', height='内高 H', base='顶板厚度 T', wall='侧壁厚度 S',
+                      opening_chamfer='开口倒角 C', outer_radius='外缘圆角 R外', inner_radius='内部圆角 R内')
+        optional = {'opening_chamfer', 'outer_radius', 'inner_radius'}
+        for name, value in asdict(self).items():
+            minimum = 0 if name in optional else .2
+            if not math.isfinite(value) or not minimum <= value <= 1000:
+                raise ValueError(f'{labels[name]}必须为 {minimum}～1000 mm 之间的有限数值。')
+        if self.opening_chamfer >= self.wall:
+            raise ValueError('开口倒角 C 必须小于侧壁厚度，以保留开口边缘。')
+        if self.outer_radius > min(self.base, self.wall):
+            raise ValueError('外缘圆角 R外 不能超过顶板厚度与侧壁厚度中的较小值。')
+        if self.inner_radius >= self.diameter/2:
+            raise ValueError('内部圆角 R内 必须小于内径的一半，以保留内腔平面。')
+        if self.inner_radius+self.opening_chamfer >= self.height:
+            raise ValueError('内部圆角 R内 与开口倒角 C 之和必须小于内高，以保留直壁段。')
+
+
+def round_cover_resolution(p):
+    # Chord deviation <= .025 mm on each sampled circle/quarter-circle.
+    radius = p.diameter/2+p.wall
+    sections = max(128, 4*math.ceil(math.pi/math.acos(1-min(.025/radius, 1))/4))
+    def quarter(r):
+        return max(8, math.ceil((math.pi/2)/(2*math.acos(1-min(.025/r, 1))))) if r else 0
+    return sections, quarter(p.outer_radius), quarter(p.inner_radius)
+
+
+def round_cover_profile(p):
+    """CCW (radius, Z) outline; closed face down, opening at +Z."""
+    p.validate()
+    r, z = p.diameter/2, p.base+p.height
+    outer, ro, ri, c = r+p.wall, p.outer_radius, p.inner_radius, p.opening_chamfer
+    _, no, ni = round_cover_resolution(p)
+    points = [(0., 0.), (outer-ro, 0.)]
+    if ro:
+        for i in range(1, no+1):
+            a = -math.pi/2+(math.pi/2)*i/no
+            points.append((outer-ro+ro*math.cos(a), ro+ro*math.sin(a)))
+    points.extend([(outer, z), (r+c, z)])
+    if c: points.append((r, z-c))
+    points.append((r, p.base+ri))
+    if ri:
+        for i in range(1, ni+1):
+            a = -(math.pi/2)*i/ni
+            points.append((r-ri+ri*math.cos(a), p.base+ri+ri*math.sin(a)))
+    points.extend([(0., p.base), (0., 0.)])
+    return points
+
+
+def build_round_cover(p):
+    import numpy as np
+    import trimesh
+    profile = round_cover_profile(p)
+    mesh = trimesh.creation.revolve(profile, sections=round_cover_resolution(p)[0])
+    check(mesh, 1)
+    if not np.allclose(mesh.extents, p.extents, atol=.001, rtol=0):
+        raise RuntimeError('圆形盖板外形尺寸检查失败。')
+    return mesh
+
+
+def round_cover_scad(p):
+    p.validate()
+    header = '// mm; opening faces +Z. Inner diameter includes your chosen fitting clearance.\n'
+    header += '\n'.join(f'{name}={value:g};' for name, value in asdict(p).items())
+    return header + '''
+assert(diameter>=0.2 && diameter<=1000 && height>=0.2 && height<=1000);
+assert(base>=0.2 && base<=1000 && wall>=0.2 && wall<=1000);
+assert(opening_chamfer>=0 && opening_chamfer<wall);
+assert(outer_radius>=0 && outer_radius<=min(base,wall));
+assert(inner_radius>=0 && inner_radius<diameter/2);
+assert(inner_radius+opening_chamfer<height);
+r=diameter/2; R=r+wall; z=height+base;
+ro=outer_radius; ri=inner_radius; c=opening_chamfer;
+function quarter(v)=v>0?max(8,ceil(90/(2*acos(1-min(0.025/v,1))))):0;
+no=quarter(ro); ni=quarter(ri);
+$fn=max(128,4*ceil(180/acos(1-min(0.025/R,1))/4));
+profile=concat([[0,0],[R-ro,0]],
+    ro>0?[for(i=[1:no]) [R-ro+ro*cos(-90+90*i/no),ro+ro*sin(-90+90*i/no)]]:[],
+    [[R,z],[r+c,z]], c>0?[[r,z-c]]:[], [[r,base+ri]],
+    ri>0?[for(i=[1:ni]) [r-ri+ri*cos(-90*i/ni),base+ri+ri*sin(-90*i/ni)]]:[],
+    [[0,base]]);
+rotate_extrude(convexity=10) polygon(profile);
+'''
+
+
+def generate_round_cover(p, destination):
+    import numpy as np
+    import trimesh
+    mesh = build_round_cover(p)
+    destination = Path(destination).expanduser().resolve()
+    destination.mkdir(parents=True, exist_ok=True)
+    mesh.export(destination/'cover_single.stl')
+    reread = trimesh.load_mesh(destination/'cover_single.stl')
+    check(reread, 1)
+    if not np.allclose(reread.extents, p.extents, atol=.001, rtol=0):
+        raise RuntimeError('圆形盖板导出尺寸检查失败。')
+    (destination/'cover_parametric.scad').write_text(round_cover_scad(p), encoding='utf-8')
+    (destination/'preview.html').write_text(preview_html(p, mesh), encoding='utf-8')
+    report = {'units':'mm', 'type':'roundcover', 'parameters':asdict(p),
+              'outer_dimensions_mm':mesh.extents.tolist(), 'opening_diameter_mm':p.diameter+2*p.opening_chamfer,
+              'inner_flat_diameter_mm':p.diameter-2*p.inner_radius,
+              'straight_wall_height_mm':p.height-p.inner_radius-p.opening_chamfer,
+              'single_closed':True, 'components':[1], 'volume_mm3':float(mesh.volume),
+              'physically_print_tested':False}
+    (destination/'parameters.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+    (destination/'打印说明.txt').write_text(f'''圆形封闭盖板，单位 mm；开口朝上建模，使用时可翻转盖合。
+内径 {p.diameter:g}，内高 {p.height:g}，顶板厚 {p.base:g}，侧壁厚 {p.wall:g}。
+外径 {p.extents[0]:g}，总高 {p.extents[2]:g}。
+开口倒角 C={p.opening_chamfer:g}：开口内缘的 45° 导入斜面，径向和轴向宽度均为 C。
+外缘圆角 R外={p.outer_radius:g}：封闭顶板与侧壁外侧交界的凸圆角，切除外部尖角。
+内部圆角 R内={p.inner_radius:g}：内腔底面与侧壁交界的凹圆角，增加材料并占用内腔边角。
+内径指直壁段净直径，不自动增加装配余量；内高从内腔中央平面量至开口。
+内腔中央平面直径 {report['inner_flat_diameter_mm']:g}；直壁高度 {report['straight_wall_height_mm']:g}。
+圆周和圆角采用多边形近似，各自弦高误差不超过 0.025 mm。
+平板外表面朝下切片，检查外缘圆角底部的悬空和支撑需求；先打印单件试配。
+已验证数字封闭性和外形尺寸，未验证实物打印和配合。
+''', encoding='utf-8')
+    return report
+
+
+@dataclass(frozen=True)
 class RectPlateParameters:
     length: float = 120.
     width: float = 100.
@@ -262,6 +396,7 @@ def build_cuboid(p):
 
 
 def build(p):
+    if isinstance(p,RoundCoverParameters):return build_round_cover(p)
     if isinstance(p,PLATES):return build_plate(p)
     if isinstance(p,UCoverParameters):return build_ucover(p)
     if isinstance(p,CuboidParameters):return build_cuboid(p)
@@ -375,7 +510,8 @@ if(mode=="four") for(x=[0,arm+wall+6]) for(y=[0,arm+wall+6])
 def preview_html(p, mesh):
     data = json.dumps({'v':mesh.vertices.round(5).tolist(),'f':mesh.faces.tolist()}, separators=(',',':'))
     labels=dict(diameter='直径',side='边长',length='长度',width='宽度',thickness='厚度',radius='圆角 R',bevel='倒角 C')
-    text = (('实心平板 · '+ ' · '.join(f'{labels[k]} {v:g}' for k,v in asdict(p).items())+' mm')
+    text = (f'圆形封闭盖板 · 内径 {p.diameter:g} · 内高 {p.height:g} · 顶板厚 {p.base:g} · 侧壁厚 {p.wall:g} · 开口倒角 {p.opening_chamfer:g} · 外缘圆角 {p.outer_radius:g} · 内部圆角 {p.inner_radius:g} mm'
+            if isinstance(p,RoundCoverParameters) else ('实心平板 · '+ ' · '.join(f'{labels[k]} {v:g}' for k,v in asdict(p).items())+' mm')
             if isinstance(p,PLATES) else
             f'四周封闭盖板 · 内长 {p.length:g} · 内宽 {p.width:g} · 内高 {p.height:g} · 平板厚 {p.base:g} · 侧壁厚 {p.wall:g} mm'
             if isinstance(p,ClosedCoverParameters) else
@@ -398,7 +534,8 @@ p{line-height:1.7}small{color:#596777}button{border:0;border-radius:8px;backgrou
 <script>
 const mesh=__DATA__,canvas=document.getElementById('view'),ctx=canvas.getContext('2d');
 let a=.78,b=-.45,zoom=1,drag=null;
-const lo=[0,1,2].map(i=>Math.min(...mesh.v.map(v=>v[i]))),hi=[0,1,2].map(i=>Math.max(...mesh.v.map(v=>v[i])));
+const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];
+for(const v of mesh.v)for(let i=0;i<3;i++){lo[i]=Math.min(lo[i],v[i]);hi[i]=Math.max(hi[i],v[i]);}
 const center=lo.map((n,i)=>(n+hi[i])/2),extent=Math.max(...hi.map((n,i)=>n-lo[i]));
 function render(){
  const r=canvas.getBoundingClientRect(),d=devicePixelRatio||1;canvas.width=r.width*d;canvas.height=r.height*d;ctx.scale(d,d);
@@ -427,6 +564,10 @@ document.getElementById('reset').onclick=()=>{a=.78;b=-.45;zoom=1;render()};wind
         template=template.replace('U 形盖板预览','四周封闭盖板预览').replace('U 形盖板：两端开口','四周封闭盖板：套入面开口').replace('一块平板和两条相对侧壁，长度方向两端开口。内宽和内高均为净尺寸，不会额外增加装配间隙。','一块平板和四周侧壁，仅套入面开口。内长、内宽、内高均为净尺寸，不额外增加装配间隙。')
     if isinstance(p,PLATES):
         template=template.replace('PCB 护角模型预览','实心平板预览').replace('PCB 四角护套','实心平板').replace('边长指沿 PCB 每条边的延伸长度，不含外侧壁厚。此处显示单个护角，不含 PCB 和包装。先打印单件试配。','R 为俯视四角圆角半径；C 为上下边缘 45° 倒角。尺寸为最大成品外尺寸。')
+    if isinstance(p,RoundCoverParameters):
+        template=template.replace('PCB 护角模型预览','圆形封闭盖板预览').replace('PCB 四角护套','圆形封闭盖板：套入面开口').replace('可拖动旋转的护角模型','可拖动旋转的圆形盖板')
+        template=template.replace('边长指沿 PCB 每条边的延伸长度，不含外侧壁厚。此处显示单个护角，不含 PCB 和包装。先打印单件试配。','一块圆形顶板与一圈侧壁，开口朝上。C 为开口内缘 45° 倒角；R外 为封闭顶板外缘圆角；R内 为内腔底角圆角，会占用内部空间。内径与内高为净尺寸，不自动增加间隙。')
+        template=template.replace("ctx.strokeStyle='#65543b';ctx.lineWidth=.4;ctx.stroke();",'ctx.strokeStyle=ctx.fillStyle;ctx.lineWidth=.3;ctx.stroke();')
     return template.replace('__TEXT__',text).replace('__DATA__',data)
 
 
@@ -474,6 +615,7 @@ cover_single.stl 为单件；cover_parametric.scad 可修改；preview.html 可�
 
 
 def generate(p, destination):
+    if isinstance(p,RoundCoverParameters):return generate_round_cover(p,destination)
     if isinstance(p,PLATES):return generate_plate(p,destination)
     if isinstance(p,UCoverParameters):return generate_ucover(p,destination)
     mesh = build(p)
@@ -556,7 +698,7 @@ def gui():
 def main():
     ap=argparse.ArgumentParser(description='生成护角、盖板、圆形/矩形/方形板 STL，单位 mm。无参数启动窗口。')
     ap.add_argument('--gui',action='store_true')
-    types={'pcb':Parameters,'cuboid':CuboidParameters,'ucover':UCoverParameters,'closedcover':ClosedCoverParameters,'circle':CirclePlateParameters,'rectangle':RectPlateParameters,'square':SquarePlateParameters}
+    types={'pcb':Parameters,'cuboid':CuboidParameters,'ucover':UCoverParameters,'closedcover':ClosedCoverParameters,'circle':CirclePlateParameters,'rectangle':RectPlateParameters,'square':SquarePlateParameters,'roundcover':RoundCoverParameters}
     allkeys=set().union(*(asdict(cls()) for cls in types.values()))
     ap.add_argument('--type',choices=list(types),default='pcb')
     for key in sorted(allkeys):

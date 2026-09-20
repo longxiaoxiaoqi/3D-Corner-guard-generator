@@ -30,6 +30,10 @@ with tempfile.TemporaryDirectory(prefix='cover-ui-') as directory:
         app.destination.set(str(base/'中文输出'))
         for index,(kind,_,_,_) in enumerate(app.types):
             app.select(index)
+            if kind=='roundcover':
+                app.values[kind]['opening_chamfer'].set('1')
+                app.values[kind]['outer_radius'].set('2')
+                app.values[kind]['inner_radius'].set('2')
             wait(root,lambda:app.future is None and app.preview_revision==app.revision)
             assert app.view.mesh is not None
             before=app.last
@@ -39,6 +43,10 @@ with tempfile.TemporaryDirectory(prefix='cover-ui-') as directory:
             assert report['type']==kind,report
             assert (app.last/'preview.html').exists()
             print('PASS desktop preview and export',kind)
+        app.values['roundcover']['opening_chamfer'].set('3')
+        assert app.validation.get() and str(app.generate_button['state'])=='disabled'
+        app.values['roundcover']['opening_chamfer'].set('1')
+        app.select(6)
         app.values['square']['side'].set('invalid')
         assert app.validation.get() and str(app.generate_button['state'])=='disabled'
         assert app.view.mesh is None
@@ -49,7 +57,7 @@ with tempfile.TemporaryDirectory(prefix='cover-ui-') as directory:
         wait(root,lambda:app.future is None and app.preview_revision==app.revision)
         app.show_history(); root.update()
         assert app.history.winfo_manager()=='pack'
-        assert [v for v,_,_ in HISTORY]==['1.5.0','1.4.0','1.3.0','1.2.0','1.1.0','1.0.0']
+        assert [v for v,_,_ in HISTORY]==['1.6.0','1.5.0','1.4.0','1.3.0','1.2.0','1.1.0','1.0.0']
         app.select(0); app.values['pcb']['arm'].set('27')
         # Changing types during a preview must not display an obsolete result.
         app.select(4); app.select(3)
@@ -60,6 +68,9 @@ with tempfile.TemporaryDirectory(prefix='cover-ui-') as directory:
     root=tk.Tk(); root.withdraw(); restored=App(root,g,base/'settings.json')
     try:
         assert restored.values['pcb']['arm'].get()=='27'
+        assert restored.values['roundcover']['inner_radius'].get()=='2'
+        assert restored.values['roundcover']['outer_radius'].get()=='2'
+        assert restored.values['roundcover']['opening_chamfer'].get()=='1'
         assert restored.destination.get()==str(base/'中文输出')
     finally: restored.close()
 print('PASS validation, navigation, history, stale preview and settings persistence')

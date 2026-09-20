@@ -10,9 +10,14 @@ import tkinter as tk
 from tkinter import ttk, filedialog
 import webbrowser
 
-VERSION = '1.5.0'
+VERSION = '1.6.0'
 BG, PANEL, INK, MUTED, ACCENT = '#eef2f6', '#ffffff', '#182c43', '#64748b', '#087f8c'
 HISTORY = [
+    ('1.6.0', '圆形封闭盖板与边缘修饰', [
+        '新增第八种模型：圆形顶板和一圈侧壁，仅套入面开口。',
+        '支持内径、内高、顶板厚度、侧壁厚度，以及开口内缘 45° 倒角。',
+        '支持顶板外缘凸圆角和内腔底角凹圆角；三个修饰参数默认均为 0。',
+        '新增特征组合校验、可滚动参数面板及圆形盖板的 STL、SCAD 和离线预览。']),
     ('1.5.0', '桌面工作台与独立 EXE', [
         '全新侧栏导航、分组参数和窗口内三维预览；拖动旋转、滚轮缩放、重置视角。',
         '后台生成与参数校验，记住各类型参数及输出目录，支持恢复默认。',
@@ -45,6 +50,9 @@ LABELS = {
     'length': ('长度', '沿两端开口方向'), 'height': ('侧壁内高', '平板内表面至侧壁顶部'),
     'base': ('平板厚度', '底部平板厚度'), 'diameter': ('直径 D', '成品最大外径'),
     'side': ('边长 A', '成品最大外尺寸'), 'thickness': ('厚度 T', '成品总厚度'),
+    'opening_chamfer': ('开口倒角 C', '开口内缘 45° 斜面，0 为无倒角'),
+    'outer_radius': ('外缘圆角 R外', '封闭顶板与外侧壁交界的圆角'),
+    'inner_radius': ('内部圆角 R内', '内腔底面与侧壁交界，占用内腔'),
     'radius': ('圆角 R', '四角圆角半径，0 为尖角'), 'bevel': ('倒角 C', '上下边缘 45° 倒角，0 为无倒角'),
 }
 
@@ -94,6 +102,7 @@ class MeshView(tk.Canvas):
         faces = self.mesh.faces
         normals = self.mesh.face_normals @ rotation.T
         for index in np.argsort(points[faces, 2].mean(axis=1)):
+            if normals[index, 2] <= 0: continue
             face = points[faces[index], :2]*scale+[w/2,h/2]
             shade = .55+.45*abs(float(normals[index] @ np.array([.3,-.5,.812])))
             color = '#%02x%02x%02x' % (int(30*shade),int(168*shade),int(179*shade))
@@ -123,6 +132,7 @@ class App:
             ('circle','圆形板',generator.CirclePlateParameters,'实心圆板，支持上下边缘倒角。'),
             ('rectangle','矩形板',generator.RectPlateParameters,'实心平板，支持四角圆角和上下边缘倒角。'),
             ('square','方形板',generator.SquarePlateParameters,'实心平板，支持四角圆角和上下边缘倒角。'),
+            ('roundcover','圆形封闭盖板',generator.RoundCoverParameters,'圆形顶板与一圈侧壁，仅套入面开口；内径和内高不自动添加间隙。'),
         ]
         self.values = {}
         saved_parameters = self.saved.get('parameters', {})
@@ -143,7 +153,7 @@ class App:
         sidebar = tk.Frame(root,bg=INK,width=210); sidebar.pack(side='left',fill='y'); sidebar.pack_propagate(False)
         tk.Label(sidebar,text='COVER / 3D',bg=INK,fg='white',font=('Segoe UI',19,'bold')).pack(anchor='w',padx=22,pady=(30,4))
         tk.Label(sidebar,text='参数化模型工作台',bg=INK,fg='#a8becf').pack(anchor='w',padx=22,pady=(0,30))
-        tk.Label(sidebar,text='模型库 / 07',bg=INK,fg='#829db3',font=('Microsoft YaHei UI',9)).pack(anchor='w',padx=22,pady=(0,12))
+        tk.Label(sidebar,text=f'模型库 / {len(self.types):02}',bg=INK,fg='#829db3',font=('Microsoft YaHei UI',9)).pack(anchor='w',padx=22,pady=(0,12))
         self.nav = []
         for index, (_, title, _, _) in enumerate(self.types):
             button = tk.Button(sidebar,text=f'{index+1:02}   {title}',anchor='w',bg=INK,fg='#c9d8e4',activebackground='#285069',activeforeground='white',relief='flat',bd=0,padx=20,pady=12,font=('Microsoft YaHei UI',10),command=lambda i=index:self.select(i))
@@ -156,7 +166,16 @@ class App:
         self.title = tk.Label(self.workspace,bg=BG,fg=INK,font=('Microsoft YaHei UI',24,'bold'),anchor='w'); self.title.pack(fill='x')
         self.subtitle = tk.Label(self.workspace,bg=BG,fg=MUTED,anchor='w'); self.subtitle.pack(fill='x',pady=(8,20))
         body = tk.Frame(self.workspace,bg=BG); body.pack(fill='both',expand=True)
-        self.form = tk.Frame(body,bg=PANEL,width=330,padx=20,pady=18); self.form.pack(side='left',fill='y'); self.form.pack_propagate(False)
+        form_box = tk.Frame(body,bg=PANEL,width=350); form_box.pack(side='left',fill='y'); form_box.pack_propagate(False)
+        self.form_canvas = tk.Canvas(form_box,bg=PANEL,highlightthickness=0)
+        form_scroll = ttk.Scrollbar(form_box,orient='vertical',command=self.form_canvas.yview)
+        form_scroll.pack(side='right',fill='y'); self.form_canvas.pack(fill='both',expand=True)
+        self.form_canvas.configure(yscrollcommand=form_scroll.set)
+        self.form = tk.Frame(self.form_canvas,bg=PANEL,padx=18,pady=18)
+        form_window = self.form_canvas.create_window((0,0),window=self.form,anchor='nw')
+        self.form.bind('<Configure>',lambda e:self.form_canvas.configure(scrollregion=self.form_canvas.bbox('all')))
+        self.form_canvas.bind('<Configure>',lambda e:self.form_canvas.itemconfigure(form_window,width=e.width))
+        self.form_canvas.bind('<MouseWheel>',self.scroll_form)
         preview = tk.Frame(body,bg=PANEL); preview.pack(side='left',fill='both',expand=True,padx=(18,0))
         bar = tk.Frame(preview,bg=PANEL); bar.pack(fill='x',padx=16,pady=12)
         tk.Label(bar,text='模型预览',bg=PANEL,fg=INK,font=('Microsoft YaHei UI',12,'bold')).pack(side='left')
@@ -197,6 +216,13 @@ class App:
             label,hint = LABELS[name]
             if key in ('rectangle','square') and name in ('length','width'):
                 label,hint = ('长度 L' if name=='length' else '宽度 W'),'成品最大外尺寸'
+            if key=='roundcover':
+                label,hint = {
+                    'diameter': ('内径 D','直壁段净直径，请自行预留间隙'),
+                    'height': ('内高 H','内腔中央平面至开口的净高度'),
+                    'base': ('顶板厚度 T','封闭顶板中央的厚度'),
+                    'wall': ('侧壁厚度 S','直壁段的径向厚度'),
+                }.get(name,(label,hint))
             if key=='closedcover' and name=='length': label,hint='内长','相对端墙内表面净距'
             row=tk.Frame(self.form,bg=PANEL); row.pack(fill='x',pady=(0,2))
             tk.Label(row,text=label,bg=PANEL,fg=INK).pack(side='left')
@@ -204,7 +230,30 @@ class App:
             ttk.Entry(row,textvariable=var,width=10,justify='right').pack(side='right',padx=6)
             tk.Label(self.form,text=hint,bg=PANEL,fg=MUTED,font=('Microsoft YaHei UI',9)).pack(anchor='w',pady=(0,12))
         ttk.Button(self.form,text='恢复此类型默认参数',command=self.defaults).pack(anchor='w',pady=(8,0))
+        self.form_canvas.yview_moveto(0)
+        def bind_scroll(parent):
+            for widget in parent.winfo_children():
+                widget.bind('<MouseWheel>',self.scroll_form)
+                if isinstance(widget,ttk.Entry): widget.bind('<FocusIn>',self.reveal_field)
+                bind_scroll(widget)
+        bind_scroll(self.form)
         self.changed()
+
+    def scroll_form(self,event):
+        if self.form.winfo_reqheight()>self.form_canvas.winfo_height():
+            self.form_canvas.yview_scroll(-1 if event.delta>0 else 1,'units')
+        return 'break'
+
+    def reveal_field(self,event):
+        self.root.update_idletasks()
+        widget=event.widget
+        y=widget.winfo_rooty()-self.form.winfo_rooty()
+        top=self.form_canvas.canvasy(0)
+        height=self.form_canvas.winfo_height()
+        total=max(self.form.winfo_height(),1)
+        if y<top: self.form_canvas.yview_moveto(max(0,y-8)/total)
+        elif y+widget.winfo_height()>top+height:
+            self.form_canvas.yview_moveto((y+widget.winfo_height()-height+8)/total)
 
     def current(self):
         key,_,cls,_ = self.types[self.index]

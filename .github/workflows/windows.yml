@@ -19,6 +19,7 @@ jobs:
           cache-dependency-path: program/requirements*.txt
       - run: python -m pip install -r program/requirements-build.txt
       - run: python tests/test_generator.py
+      - run: python tests/test_round_cover.py
       - run: python tests/test_desktop.py
       - name: Build standalone EXE
         working-directory: program

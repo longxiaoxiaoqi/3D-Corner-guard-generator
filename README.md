@@ -1,11 +1,37 @@
 # 护角、盖板与平板生成器
 
-## v1.5.0 桌面工作台
+## v1.6.0 圆形封闭盖板
 
-- 左侧选择七类模型，中间修改尺寸，右侧直接查看实际网格；支持旋转、缩放和重置视角。
+在模型库选择 **08 圆形封闭盖板**。圆形顶板和一圈侧壁封闭，仅套入面开口；预览和 STL 开口朝上，使用时翻转盖合。
+
+| 参数 | 默认值（mm） | 定义 |
+|---|---:|---|
+| 内径 D | 100 | 直壁段的内腔净直径，不自动添加装配间隙 |
+| 内高 H | 15 | 内腔中央平面到开口的净高度 |
+| 顶板厚度 T | 3 | 封闭圆板中央厚度 |
+| 侧壁厚度 S | 3 | 圆周直壁的径向厚度 |
+| 开口倒角 C | 0 | 开口内缘 45° 斜面，轴向与径向宽度各为 C |
+| 外缘圆角 R外 | 0 | 顶板与侧壁外部交界的凸圆角，切除外部尖角 |
+| 内部圆角 R内 | 0 | 内腔底面与侧壁交界的凹圆角，增加材料并占用内腔边角 |
+
+外径为 `D+2S`，总高为 `H+T`。倒角后的开口直径为 `D+2C`；内部平面直径为 `D-2R内`，直壁段高度为 `H-R内-C`。
+
+约束：`C<S`，`R外≤min(T,S)`，`R内<D/2`，`R内+C<H`。三个修饰参数均可为 0；非法组合明确报错，不自动缩小参数。基础尺寸支持 0.2～1000 mm。圆周与圆角分别按最大 0.025 mm 弦高误差取样。
+
+```shell
+python program/corner_guard.py --type roundcover --diameter 100 --height 15 --base 3 --wall 3 --opening_chamfer 1 --outer_radius 2 --inner_radius 2 --out ./roundcover-model
+```
+
+导出 `cover_single.stl`、`cover_parametric.scad`、`preview.html`、`parameters.json` 和打印说明。外缘圆角位于开口朝上展示时的底部外缘，切片时检查该处悬空和支撑需求。先打印试配。
+
+[查看同时带三种边缘修饰的示例](examples/roundcover/parameters.json)。
+
+## 桌面工作台
+
+- 左侧选择八类模型，中间修改尺寸，右侧直接查看实际网格；支持旋转、缩放和重置视角。
 - 参数修改后自动更新预览；后台生成 STL，界面保持响应。无效参数会在页面内提示。
 - 记住每类参数和输出目录，可恢复默认。设置位于 `%LOCALAPPDATA%/CoverGenerator/settings.json`。
-- 点击侧栏 **版本更新** 查看 v1.0.0 至 v1.5.0 的完整记录，也可阅读 [CHANGELOG.md](CHANGELOG.md)。
+- 点击侧栏 **版本更新** 查看 v1.0.0 至 v1.6.0 的完整记录，也可阅读 [CHANGELOG.md](CHANGELOG.md)。
 - [下载 Windows 独立 EXE](https://github.com/longxiaoxiaoqi/3D-Cover-generator/releases/latest)：内置 Python 和建模依赖，首次及后续运行均无需安装依赖。首次解压启动可能稍慢。
 
 ### 运行与打包
@@ -268,7 +294,7 @@ Copy-Item -Recurse -Path ./skills/pcb-corner-guard -Destination $skillBase
 ## 仓库结构与验证
 
 ```text
-program/                    七种类型的参数窗口与命令行程序
+program/                    八种类型的参数窗口与命令行程序
 skills/pcb-corner-guard/     可复制安装的完整技能
 examples/default/           默认参数示例和装配图
 examples/cuboid/            三面护角示例、八件排版和预览图
@@ -279,7 +305,7 @@ examples/rectangle/         圆角矩形板示例
 examples/square/            方形板示例
 tests/test_generator.py     几何及非法输入测试
 tests/test_desktop.py       桌面预览、导出与设置测试
-tests/test_frozen.py        独立 EXE 七类模型导出测试
+tests/test_frozen.py        独立 EXE 八类模型导出测试
 ```
 
 安装运行依赖后，在 Windows 桌面环境运行：
@@ -287,8 +313,9 @@ tests/test_frozen.py        独立 EXE 七类模型导出测试
 ```powershell
 python tests/test_generator.py
 python tests/test_desktop.py
+python tests/test_round_cover.py
 ```
 
-测试覆盖 22 组几何参数，包括平板尖角、圆角、上下倒角、R<C、最大圆角和接近厚度上限的倒角；同时检查原有护角、盖板、非法输入及七种类型的窗口生成按钮。测试输出写入已忽略的 `test-output/`。
+测试覆盖 22 组几何参数，包括平板尖角、圆角、上下倒角、R<C、最大圆角和接近厚度上限的倒角；同时检查原有护角、盖板、非法输入及八种类型的窗口生成按钮。测试输出写入已忽略的 `test-output/`。
 
 程序和技能各自携带生成器，方便单独分发；修改生成逻辑后，请同步 `program/corner_guard.py` 和 `skills/pcb-corner-guard/scripts/corner_guard.py`，同时保持依赖文件一致。
