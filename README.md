@@ -1,5 +1,27 @@
 # 护角、盖板与平板生成器
 
+## v1.5.0 桌面工作台
+
+- 左侧选择七类模型，中间修改尺寸，右侧直接查看实际网格；支持旋转、缩放和重置视角。
+- 参数修改后自动更新预览；后台生成 STL，界面保持响应。无效参数会在页面内提示。
+- 记住每类参数和输出目录，可恢复默认。设置位于 `%LOCALAPPDATA%/CoverGenerator/settings.json`。
+- 点击侧栏 **版本更新** 查看 v1.0.0 至 v1.5.0 的完整记录，也可阅读 [CHANGELOG.md](CHANGELOG.md)。
+- [下载 Windows 独立 EXE](https://github.com/longxiaoxiaoqi/3D-Cover-generator/releases/latest)：内置 Python 和建模依赖，首次及后续运行均无需安装依赖。首次解压启动可能稍慢。
+
+### 运行与打包
+
+**Windows 用户：** 下载发布页的 `CoverGenerator.exe`，双击启动。输出默认在用户文档下的“生成的模型”，可自行选择。
+
+**源码用户：** 安装 64 位 Python 3.13 或 3.14（含 tkinter/Tcl-Tk），双击 `program/启动生成器.cmd`。启动器在 `%LOCALAPPDATA%/CoverGenerator/runtime` 创建独立环境，仅首次、依赖变化或缺失时联网安装。初始化失败会保留错误提示，重新启动可重试，不修改系统 Python 的依赖。
+
+**本地打包：** 双击 `program/打包EXE.cmd`；完成后文件位于 `program/dist/CoverGenerator.exe`。也可在安装 `program/requirements-build.txt` 后进入 `program` 执行 `python -m PyInstaller --noconfirm CoverGenerator.spec`。必须在 Windows 上构建 Windows EXE。
+
+**自动构建：** GitHub Actions 在提交与手动触发时运行几何、桌面测试并上传 EXE；推送 `v*` 标签时发布对应版本。
+
+预览采用离线正交投影，无需浏览器内核或联网服务。模型实际几何、STL/SCAD/HTML 导出及毫米尺寸定义保持一致。
+
+
+
 **v1.4.0 新增圆形板、矩形板、方形板，共七种类型。** 矩形和方形支持四角圆角 R，三种平板都支持上下边缘倒角 C；不会改变原有护角和盖板结构。
 
 ## 圆形、矩形与方形实心板
@@ -134,12 +156,12 @@ python program/corner_guard.py --type cuboid --x 20 --y 25 --z 30 --wall 3 --out
 
 ## 快速开始：本地程序
 
-当前已在 **Windows / Python 3.14** 验证。程序包不是独立 EXE。
+源码已在 Windows / Python 3.13 验证（历史版本在 3.14 验证）；v1.5.0 起提供独立 EXE。
 
 1. 克隆本仓库，或点击 GitHub 的 **Code → Download ZIP**，解压到本地。
-2. 安装 Python 3.14，启用 PATH，并保留 tkinter/Tcl-Tk 组件。
-3. 打开 `program` 文件夹，双击 **安装依赖.cmd**。首次安装需要联网。
-4. 双击 **启动生成器.cmd**，输入尺寸和输出目录，再点击 **生成护角模型**。
+2. 安装 Python 3.13 或 3.14，启用 PATH，并保留 tkinter/Tcl-Tk 组件。
+3. 打开 `program` 文件夹，双击 **启动生成器.cmd**，首次自动安装依赖，需要联网。
+4. 选择模型，输入尺寸和输出目录，再点击 **生成模型**。
 5. 完成后点击 **打开 3D 预览**，可拖动旋转、滚轮缩放。
 
 依赖安装完毕后，模型生成与 HTML 预览均可离线使用。窗口程序每次会新建带时间的文件夹，保留之前的模型。
@@ -255,13 +277,16 @@ examples/closedcover/       四周封闭盖板示例和预览图
 examples/circle/            圆形板示例
 examples/rectangle/         圆角矩形板示例
 examples/square/            方形板示例
-tests/test_generator.py     几何、非法输入及窗口生成测试
+tests/test_generator.py     几何及非法输入测试
+tests/test_desktop.py       桌面预览、导出与设置测试
+tests/test_frozen.py        独立 EXE 七类模型导出测试
 ```
 
 安装运行依赖后，在 Windows 桌面环境运行：
 
 ```powershell
 python tests/test_generator.py
+python tests/test_desktop.py
 ```
 
 测试覆盖 22 组几何参数，包括平板尖角、圆角、上下倒角、R<C、最大圆角和接近厚度上限的倒角；同时检查原有护角、盖板、非法输入及七种类型的窗口生成按钮。测试输出写入已忽略的 `test-output/`。

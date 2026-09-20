@@ -139,44 +139,5 @@ for p in [g.RectPlateParameters(radius=51),g.RectPlateParameters(bevel=1.5),
     else:raise AssertionError('Invalid plate parameters accepted')
 print('PASS invalid plate parameters rejected')
 
-# Exercise the actual GUI generate button without displaying a desktop window.
-import tkinter as tk
-from tkinter import ttk, messagebox
-def smoke(root):
-    root.withdraw()
-    def widgets(parent):
-        for child in parent.winfo_children():
-            yield child
-            yield from widgets(child)
-    items=list(widgets(root))
-    entries=[x for x in items if isinstance(x,ttk.Entry)]
-    assert len(entries)==33
-    entries[-1].delete(0,'end');entries[-1].insert(0,str(ROOT/'test-output/gui'))
-    button=next(x for x in items if isinstance(x,ttk.Button) and x.cget('text')=='生成模型')
-    preview=next(x for x in items if isinstance(x,ttk.Button) and x.cget('text')=='打开 3D 预览')
-    messagebox.showerror=lambda title,message:(_ for _ in ()).throw(AssertionError(message))
-    button.invoke()
-    assert str(preview.cget('state'))=='normal'
-    assert list((ROOT/'test-output/gui').glob('*/corner_single.stl'))
-    notebook=next(x for x in items if isinstance(x,ttk.Notebook))
-    notebook.select(1)
-    # Invalid hidden PCB fields must not prevent cuboid generation.
-    entries[0].delete(0,'end');entries[0].insert(0,'invalid')
-    button.invoke()
-    assert list((ROOT/'test-output/gui').glob('*/corner_eight.stl'))
-    notebook.select(2)
-    button.invoke()
-    assert list((ROOT/'test-output/gui').glob('*/cover_single.stl'))
-    notebook.select(3)
-    button.invoke()
-    import json
-    reports=[json.loads(f.read_text(encoding='utf-8')) for f in (ROOT/'test-output/gui').glob('*/parameters.json')]
-    assert any(r.get('type')=='closedcover' for r in reports)
-    for index,kind in [(4,'circle'),(5,'rectangle'),(6,'square')]:
-        notebook.select(index);button.invoke()
-        reports=[json.loads(f.read_text(encoding='utf-8')) for f in (ROOT/'test-output/gui').glob('*/parameters.json')]
-        assert any(r.get('type')==kind for r in reports)
-    root.destroy()
-tk.Tk.mainloop=smoke
-g.gui()
-print('PASS GUI form and generate button')
+# Desktop integration checks live separately so geometry can run headlessly.
+print('PASS all geometry and CLI checks')
