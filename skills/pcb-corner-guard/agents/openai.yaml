@@ -1,4 +1,4 @@
 interface:
-  display_name: "护角与 U 形盖板生成器"
-  short_description: "按参数生成 PCB 夹槽护角、立方体三面护角或两端开口 U 形盖板"
+  display_name: "护角与盖板生成器"
+  short_description: "按尺寸生成 PCB 护角、三面护角、U 形盖板及四周封闭盖板模型"
   default_prompt: "使用 $pcb-corner-guard 生成护角：内嵌 2.2 mm，夹槽 4.1 mm，上下各垫高 5 mm，边长 15 mm。"

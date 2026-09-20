@@ -74,6 +74,13 @@ class UCoverParameters:
                 raise ValueError(f'{labels[key]}必须是 0.2～1000 mm 之间的有限数值。')
 
 
+@dataclass(frozen=True)
+class ClosedCoverParameters(UCoverParameters):
+    @property
+    def extents(self):
+        return [self.length+2*self.wall,self.width+2*self.wall,self.height+self.base]
+
+
 def build_ucover(p):
     p.validate()
     import numpy as np
@@ -81,12 +88,15 @@ def build_ucover(p):
     import trimesh
     # X is the open-ended length; opposite walls run along X, at Y=0 and Y=max.
     body=m.Manifold.cube(p.extents)
-    body-=m.Manifold.cube((p.length+2,p.width,p.height+1)).translate((-1,p.wall,p.base))
+    if isinstance(p,ClosedCoverParameters):
+        body-=m.Manifold.cube((p.length,p.width,p.height+1)).translate((p.wall,p.wall,p.base))
+    else:
+        body-=m.Manifold.cube((p.length+2,p.width,p.height+1)).translate((-1,p.wall,p.base))
     raw=body.to_mesh()
     mesh=trimesh.Trimesh(vertices=np.asarray(raw.vert_properties)[:,:3],faces=np.asarray(raw.tri_verts),process=True)
     check(mesh,1)
     if not np.allclose(mesh.extents,p.extents,atol=.0002,rtol=0):
-        raise RuntimeError('U 形盖板尺寸检查失败。')
+        raise RuntimeError('盖板尺寸检查失败。')
     return mesh
 
 
@@ -149,6 +159,14 @@ def check(mesh, components):
 
 
 def scad_source(p):
+    if isinstance(p,ClosedCoverParameters):
+        return '// Four-wall cover. mm. length, width and height are INNER dimensions.\n'+'\n'.join(f'{k}={v:g};' for k,v in asdict(p).items())+'''
+assert(min(width,length,height,base,wall)>=0.2);
+difference() {
+    cube([length+2*wall,width+2*wall,height+base]);
+    translate([wall,wall,base]) cube([length,width,height+1]);
+}
+'''
     if isinstance(p,UCoverParameters):
         return '// U-shaped cover. mm. width is INNER width; height is INNER wall height.\n'+'\n'.join(f'{k}={v:g};' for k,v in asdict(p).items())+'''
 assert(min(width,length,height,base,wall)>=0.2);
@@ -212,7 +230,9 @@ if(mode=="four") for(x=[0,arm+wall+6]) for(y=[0,arm+wall+6])
 
 def preview_html(p, mesh):
     data = json.dumps({'v':mesh.vertices.round(5).tolist(),'f':mesh.faces.tolist()}, separators=(',',':'))
-    text = (f'U 形盖板 · 内宽 {p.width:g} · 长度 {p.length:g} · 侧壁内高 {p.height:g} · 平板厚 {p.base:g} · 侧壁厚 {p.wall:g} mm'
+    text = (f'四周封闭盖板 · 内长 {p.length:g} · 内宽 {p.width:g} · 内高 {p.height:g} · 平板厚 {p.base:g} · 侧壁厚 {p.wall:g} mm'
+            if isinstance(p,ClosedCoverParameters) else
+            f'U 形盖板 · 内宽 {p.width:g} · 长度 {p.length:g} · 侧壁内高 {p.height:g} · 平板厚 {p.base:g} · 侧壁厚 {p.wall:g} mm'
             if isinstance(p,UCoverParameters) else
             f'三面护角 · X 包覆 {p.x:g} · Y 包覆 {p.y:g} · Z 包覆 {p.z:g} · 壁厚 {p.wall:g} mm'
             if isinstance(p,CuboidParameters) else
@@ -256,6 +276,8 @@ document.getElementById('reset').onclick=()=>{a=.78;b=-.45;zoom=1;render()};wind
         template=template.replace('PCB 护角模型预览','三面护角模型预览').replace('PCB 四角护套','立方体 / 长方体三面护角').replace('边长指沿 PCB 每条边的延伸长度，不含外侧壁厚。此处显示单个护角，不含 PCB 和包装。先打印单件试配。','X/Y/Z 为沿物体三条棱的包覆长度，不含壁厚；三个相邻面封闭，对向全部开口。先打印单件试配。')
     if isinstance(p,UCoverParameters):
         template=template.replace('PCB 护角模型预览','U 形盖板预览').replace('PCB 四角护套','U 形盖板：两端开口').replace('边长指沿 PCB 每条边的延伸长度，不含外侧壁厚。此处显示单个护角，不含 PCB 和包装。先打印单件试配。','一块平板和两条相对侧壁，长度方向两端开口。内宽和内高均为净尺寸，不会额外增加装配间隙。')
+    if isinstance(p,ClosedCoverParameters):
+        template=template.replace('U 形盖板预览','四周封闭盖板预览').replace('U 形盖板：两端开口','四周封闭盖板：套入面开口').replace('一块平板和两条相对侧壁，长度方向两端开口。内宽和内高均为净尺寸，不会额外增加装配间隙。','一块平板和四周侧壁，仅套入面开口。内长、内宽、内高均为净尺寸，不额外增加装配间隙。')
     return template.replace('__TEXT__',text).replace('__DATA__',data)
 
 
@@ -269,13 +291,26 @@ def generate_ucover(p,destination):
     reread=trimesh.load_mesh(destination/'cover_single.stl')
     check(reread,1)
     if not np.allclose(reread.extents,p.extents,atol=.001,rtol=0):
-        raise RuntimeError('U 形盖板导出尺寸校验失败。')
+        raise RuntimeError('盖板导出尺寸校验失败。')
     (destination/'cover_parametric.scad').write_text(scad_source(p),encoding='utf-8')
     (destination/'preview.html').write_text(preview_html(p,mesh),encoding='utf-8')
-    report={'units':'mm','type':'ucover','parameters':asdict(p),'outer_dimensions_mm':mesh.extents.tolist(),
+    closed=isinstance(p,ClosedCoverParameters)
+    report={'units':'mm','type':'closedcover' if closed else 'ucover','parameters':asdict(p),'outer_dimensions_mm':mesh.extents.tolist(),
             'volume_mm3':float(mesh.volume),'single_closed':True,'components':[1],'physically_print_tested':False}
     (destination/'parameters.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
-    (destination/'打印说明.txt').write_text(f'''U 形盖板（单位：mm）
+    if closed:
+        note=f'''四周封闭盖板（单位：mm）
+内长 {p.length:g}，内宽 {p.width:g}，内高 {p.height:g}，平板厚度 {p.base:g}，侧壁厚度 {p.wall:g}。
+外形：外长 {p.length+2*p.wall:g} × 外宽 {p.width+2*p.wall:g} × 总高 {p.height+p.base:g}。
+结构为一块平板和四周侧壁，仅套入物体的一面开口，不是六面封死的盒体。
+内长、内宽是相对侧壁内表面的净距离，内高从平板内表面量起。不自动增加装配间隙。
+cover_single.stl 为单件；cover_parametric.scad 可修改；preview.html 可离线旋转查看。
+平板外表面朝下打印，切片单位毫米、100% 比例。确认打印平台尺寸及物体配合间隙。
+四周侧壁等高等厚，无卡扣、圆角或螺丝孔。预览开口朝上，作盖板使用时可以翻转。
+已检查数字模型封闭性和尺寸，未进行实物打印、配合或承载测试。
+'''
+    else:
+        note=f'''U 形盖板（单位：mm）
 内宽 {p.width:g}，长度 {p.length:g}，侧壁内高 {p.height:g}，平板厚度 {p.base:g}，侧壁厚度 {p.wall:g}。
 外形：长度 {p.length:g} × 外宽 {p.width+2*p.wall:g} × 总高 {p.height+p.base:g}。
 结构为一块平板和两条相对的侧壁，沿长度方向两端敞开，没有端墙、顶盖、卡扣或螺丝孔。
@@ -284,7 +319,8 @@ cover_single.stl 为单件；cover_parametric.scad 可修改；preview.html 可�
 平板外表面朝下打印，导入切片软件时使用毫米、100% 比例。确认模型适合打印平台。
 尺寸较大时需检查平板翘曲和设备设置。用于套住物体时，先确认内宽和内高的装配余量。
 已验证数字模型封闭性和尺寸，未进行实物打印、配合或承载测试。
-''',encoding='utf-8')
+'''
+    (destination/'打印说明.txt').write_text(note,encoding='utf-8')
     return report
 
 
@@ -365,14 +401,15 @@ corner_parametric.scad 是可编辑源文件；preview.html 可离线打开、�
 def gui():
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox
-    root=tk.Tk(); root.title('护角与 U 形盖板生成器 v1.2'); root.geometry('760x740'); root.minsize(740,720)
+    root=tk.Tk(); root.title('护角与盖板生成器 v1.3'); root.geometry('820x740'); root.minsize(800,720)
     outer=ttk.Frame(root,padding=24); outer.pack(fill='both',expand=True)
-    ttk.Label(outer,text='护角与 U 形盖板生成器',font=('Microsoft YaHei UI',18,'bold')).pack(anchor='w')
+    ttk.Label(outer,text='护角与盖板生成器',font=('Microsoft YaHei UI',18,'bold')).pack(anchor='w')
     ttk.Label(outer,text='选择结构类型，输入毫米尺寸，生成 STL 和可旋转预览。').pack(anchor='w',pady=(8,16))
     notebook=ttk.Notebook(outer);notebook.pack(fill='x')
     form=ttk.Frame(notebook,padding=12);notebook.add(form,text='PCB 夹槽护角')
     cubeform=ttk.Frame(notebook,padding=12);notebook.add(cubeform,text='立方体 / 长方体三面护角')
     uform=ttk.Frame(notebook,padding=12);notebook.add(uform,text='U 形盖板')
+    closedform=ttk.Frame(notebook,padding=12);notebook.add(closedform,text='四周封闭盖板')
     fields={}
     spec=[('overlap','内嵌深度','覆盖 PCB 边缘的宽度'),('slot','夹槽高度','槽的净高，已包含你需要的间隙'),
           ('top','上垫高','从夹槽上表面向上'),('bottom','下垫高','从夹槽下表面向下'),
@@ -395,8 +432,15 @@ def gui():
         ttk.Entry(uform,textvariable=var,width=12).grid(row=row,column=1,padx=14)
         ttk.Label(uform,text=hint).grid(row=row,column=2,sticky='w')
     ttk.Label(uform,text='两端开口；不额外添加装配间隙。输出单件盖板。').grid(row=5,column=0,columnspan=3,sticky='w',pady=10)
+    closedfields={}
+    for row,(key,label,hint) in enumerate([('length','内长','两端侧壁内表面之间的净距离'),('width','内宽','左右侧壁内表面之间的净距离'),('height','内高','从平板内表面到侧壁口沿'),('base','平板厚度','中间平板的厚度'),('wall','侧壁厚度','四周侧壁的共同厚度')]):
+        ttk.Label(closedform,text=label+' (mm)').grid(row=row,column=0,sticky='w',pady=7)
+        var=tk.StringVar(value=f'{getattr(ClosedCoverParameters(),key):g}');closedfields[key]=var
+        ttk.Entry(closedform,textvariable=var,width=12).grid(row=row,column=1,padx=14)
+        ttk.Label(closedform,text=hint).grid(row=row,column=2,sticky='w')
+    ttk.Label(closedform,text='四周封闭，仅套入面开口；不额外添加装配间隙。').grid(row=5,column=0,columnspan=3,sticky='w',pady=10)
     def current():
-        cls,values=[(Parameters,fields),(CuboidParameters,cubefields),(UCoverParameters,ufields)][notebook.index(notebook.select())]
+        cls,values=[(Parameters,fields),(CuboidParameters,cubefields),(UCoverParameters,ufields),(ClosedCoverParameters,closedfields)][notebook.index(notebook.select())]
         p=cls(**{k:float(v.get()) for k,v in values.items()});p.validate();return p
     dims=tk.StringVar()
     def update(*_):
@@ -405,7 +449,7 @@ def gui():
             size=p.extents if isinstance(p,UCoverParameters) else ([p.x+p.wall,p.y+p.wall,p.z+p.wall] if isinstance(p,CuboidParameters) else [p.arm+p.wall,p.arm+p.wall,p.height])
             dims.set('单件外形：'+' × '.join(f'{v:g}' for v in size)+' mm')
         except ValueError: dims.set('请填写有效尺寸。')
-    for v in [*fields.values(),*cubefields.values(),*ufields.values()]: v.trace_add('write',update)
+    for v in [*fields.values(),*cubefields.values(),*ufields.values(),*closedfields.values()]: v.trace_add('write',update)
     notebook.bind('<<NotebookTabChanged>>',update)
     update();ttk.Label(outer,textvariable=dims).pack(anchor='w',pady=12)
     dest=tk.StringVar(value=str(Path(__file__).resolve().parent/'生成的模型'))
@@ -423,7 +467,7 @@ def gui():
             p=current()
             if not dest.get().strip():raise ValueError('请选择输出目录。')
             button.config(state='disabled'); status.set('正在生成并检查模型……');root.update_idletasks()
-            prefix='U形盖板_' if isinstance(p,UCoverParameters) else ('三面护角_' if isinstance(p,CuboidParameters) else 'PCB护角_')
+            prefix='四周封闭盖板_' if isinstance(p,ClosedCoverParameters) else ('U形盖板_' if isinstance(p,UCoverParameters) else ('三面护角_' if isinstance(p,CuboidParameters) else 'PCB护角_'))
             path=Path(dest.get())/(prefix+datetime.now().strftime('%Y%m%d_%H%M%S_%f'))
             generate(p,path);last[0]=path.resolve();status.set(f'已生成并通过封闭性检查：{last[0]}')
             preview.config(state='normal')
@@ -439,9 +483,9 @@ def gui():
 
 
 def main():
-    ap=argparse.ArgumentParser(description='生成 PCB 护角、三面护角或 U 形盖板 STL，单位 mm。无参数启动窗口。')
+    ap=argparse.ArgumentParser(description='生成 PCB 护角、三面护角、U 形或四周封闭盖板 STL，单位 mm。无参数启动窗口。')
     ap.add_argument('--gui',action='store_true')
-    types={'pcb':Parameters,'cuboid':CuboidParameters,'ucover':UCoverParameters}
+    types={'pcb':Parameters,'cuboid':CuboidParameters,'ucover':UCoverParameters,'closedcover':ClosedCoverParameters}
     allkeys=set().union(*(asdict(cls()) for cls in types.values()))
     ap.add_argument('--type',choices=list(types),default='pcb')
     for key in sorted(allkeys):

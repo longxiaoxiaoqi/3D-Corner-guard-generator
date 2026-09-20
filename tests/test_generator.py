@@ -91,6 +91,30 @@ bad=subprocess.run([sys.executable,str(source),'--type','ucover','--slot','4','-
 assert bad.returncode!=0
 print('PASS invalid U cover inputs and irrelevant parameters rejected')
 
+for index,p in enumerate([g.ClosedCoverParameters(),g.ClosedCoverParameters(length=70,width=45,height=20,base=2,wall=4),g.ClosedCoverParameters(length=2,width=.6,height=.8,base=.2,wall=.3)]):
+    directory=ROOT/'test-output'/f'closedcover{index}'
+    report=g.generate(p,directory)
+    mesh=trimesh.load_mesh(directory/'cover_single.stl')
+    expected=np.prod(p.extents)-p.length*p.width*p.height
+    assert abs(mesh.volume-expected)<.01
+    assert np.allclose(mesh.extents,p.extents,atol=.001)
+    solid=m.Manifold(m.Mesh(np.asarray(mesh.vertices,dtype=np.float32),np.asarray(mesh.faces,dtype=np.uint32)))
+    full=p.extents[0]*p.extents[1]
+    assert abs(solid.slice(p.base/2).area()-full)<.001
+    assert abs(solid.slice(p.base+p.height/2).area()-(full-p.length*p.width))<.001
+    # Only the insertion face is open; verify cavity and all four wall regions.
+    probe=m.Manifold.cube((p.length-.02,p.width-.02,p.height+1)).translate((p.wall+.01,p.wall+.01,p.base+.01))
+    assert (solid^probe).volume()<.0001
+    for offset,extents in [((0,0,p.base),(p.wall,p.extents[1],p.height)),
+                           ((p.wall+p.length,0,p.base),(p.wall,p.extents[1],p.height)),
+                           ((p.wall,0,p.base),(p.length,p.wall,p.height)),
+                           ((p.wall,p.wall+p.width,p.base),(p.length,p.wall,p.height))]:
+        probe=m.Manifold.cube(extents).translate(offset)
+        assert abs((solid^probe).volume()-np.prod(extents))<.001
+    assert report['type']=='closedcover'
+    print('PASS four-wall cover, inner dimensions and open insertion face',index)
+del solid,probe
+
 # Exercise the actual GUI generate button without displaying a desktop window.
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -102,7 +126,7 @@ def smoke(root):
             yield from widgets(child)
     items=list(widgets(root))
     entries=[x for x in items if isinstance(x,ttk.Entry)]
-    assert len(entries)==16
+    assert len(entries)==21
     entries[-1].delete(0,'end');entries[-1].insert(0,str(ROOT/'test-output/gui'))
     button=next(x for x in items if isinstance(x,ttk.Button) and x.cget('text')=='生成模型')
     preview=next(x for x in items if isinstance(x,ttk.Button) and x.cget('text')=='打开 3D 预览')
@@ -119,6 +143,11 @@ def smoke(root):
     notebook.select(2)
     button.invoke()
     assert list((ROOT/'test-output/gui').glob('*/cover_single.stl'))
+    notebook.select(3)
+    button.invoke()
+    import json
+    reports=[json.loads(f.read_text(encoding='utf-8')) for f in (ROOT/'test-output/gui').glob('*/parameters.json')]
+    assert any(r.get('type')=='closedcover' for r in reports)
     root.destroy()
 tk.Tk.mainloop=smoke
 g.gui()

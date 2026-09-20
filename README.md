@@ -1,4 +1,30 @@
-# 护角与 U 形盖板生成器
+# 护角与盖板生成器
+
+**v1.3.0 新增四周封闭盖板**，现支持 PCB 护角、三面护角、U 形盖板、四周封闭盖板四种类型。
+
+## 四周封闭盖板
+
+![四周封闭盖板](examples/closedcover/closedcover-preview.png)
+
+选择窗口的 **四周封闭盖板** 选项卡，输入内长、内宽、内高、平板厚度、侧壁厚度。默认分别为 **120、100、15、3、3 mm**。
+
+结构是一块平板加四周侧壁，**只有套入物体的一面开口**，不是六面完全封闭盒体。侧壁等高等厚，暂不包含圆角、孔和卡扣。
+
+内长、内宽均为相对侧壁内表面的净距离，内高从平板内表面量起。不额外增加配合余量；套在物体外面时需在输入尺寸中预留间隙。
+
+外形尺寸为 **(内长＋2×侧壁厚) × (内宽＋2×侧壁厚) × (内高＋平板厚)**，默认是 **126 × 106 × 18 mm**。注意此处的“内长”与 U 形盖板的“长度”定义不同。
+
+```powershell
+python program/corner_guard.py --type closedcover --length 120 --width 100 --height 15 --base 3 --wall 3 --out ./closedcover-model
+```
+
+输出单件 `cover_single.stl`、参数化源文件 `cover_parametric.scad`、离线预览、参数记录和打印说明。平板外表面朝下打印，预览开口朝上，使用时可以翻转盖住物体。
+
+技能示例：
+
+> 用 $pcb-corner-guard 生成四周封闭盖板：内长 120、内宽 100、内高 15、平板厚度 3、侧壁厚度 3 mm。
+
+[查看默认四周封闭盖板示例](examples/closedcover)
 
 **v1.2.0 新增 U 形盖板**，程序现有 PCB 夹槽护角、立方体 / 长方体三面护角、U 形盖板三种类型。
 
@@ -189,11 +215,12 @@ Copy-Item -Recurse -Path ./skills/pcb-corner-guard -Destination $skillBase
 ## 仓库结构与验证
 
 ```text
-program/                    三种类型的参数窗口与命令行程序
+program/                    四种类型的参数窗口与命令行程序
 skills/pcb-corner-guard/     可复制安装的完整技能
 examples/default/           默认参数示例和装配图
 examples/cuboid/            三面护角示例、八件排版和预览图
 examples/ucover/            两端开口 U 形盖板示例和预览图
+examples/closedcover/       四周封闭盖板示例和预览图
 tests/test_generator.py     几何、非法输入及窗口生成测试
 ```
 
@@ -203,6 +230,6 @@ tests/test_generator.py     几何、非法输入及窗口生成测试
 python tests/test_generator.py
 ```
 
-测试覆盖四组 PCB 尺寸、三组三面护角尺寸、三组 U 形盖板尺寸；包括独立截面与体积、三面护角三向开口、盖板两端开口与厚度、镜像排版、非法参数，以及三个类型的窗口生成按钮。测试输出写入已忽略的 `test-output/`。
+测试覆盖四组 PCB 尺寸、三组三面护角尺寸、三组 U 形盖板和三组四周封闭盖板尺寸；包括独立截面与体积、开口及四周侧壁、镜像排版、非法参数，以及四种类型的窗口生成按钮。测试输出写入已忽略的 `test-output/`。
 
 程序和技能各自携带生成器，方便单独分发；修改生成逻辑后，请同步 `program/corner_guard.py` 和 `skills/pcb-corner-guard/scripts/corner_guard.py`，同时保持依赖文件一致。
