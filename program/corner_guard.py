@@ -81,6 +81,149 @@ class ClosedCoverParameters(UCoverParameters):
         return [self.length+2*self.wall,self.width+2*self.wall,self.height+self.base]
 
 
+@dataclass(frozen=True)
+class RectPlateParameters:
+    length: float = 120.
+    width: float = 100.
+    thickness: float = 3.
+    radius: float = 0.
+    bevel: float = 0.
+    def validate(self):validate_plate(self)
+
+
+@dataclass(frozen=True)
+class SquarePlateParameters:
+    side: float = 100.
+    thickness: float = 3.
+    radius: float = 0.
+    bevel: float = 0.
+    def validate(self):validate_plate(self)
+
+
+@dataclass(frozen=True)
+class CirclePlateParameters:
+    diameter: float = 100.
+    thickness: float = 3.
+    bevel: float = 0.
+    def validate(self):validate_plate(self)
+
+
+PLATES=(RectPlateParameters,SquarePlateParameters,CirclePlateParameters)
+
+
+def plate_size(p):
+    if isinstance(p,CirclePlateParameters):return [p.diameter,p.diameter,p.thickness]
+    if isinstance(p,SquarePlateParameters):return [p.side,p.side,p.thickness]
+    return [p.length,p.width,p.thickness]
+
+
+def validate_plate(p):
+    for key,value in asdict(p).items():
+        minimum=0 if key in ('radius','bevel') else .2
+        if not math.isfinite(value) or not minimum<=value<=1000:
+            raise ValueError(f'{key} 必须为 {minimum}～1000 mm 的有限数值。')
+    a,b,t=plate_size(p)
+    if getattr(p,'radius',0)>min(a,b)/2:
+        raise ValueError('圆角半径 R 不能超过短边的一半。')
+    if p.bevel>=min(a,b,t)/2:
+        raise ValueError('倒角 C 必须小于厚度及短边（或直径）的一半；0 表示无倒角。')
+
+
+def build_plate(p):
+    p.validate()
+    import numpy as np
+    import trimesh
+    a,b,t=plate_size(p);c=p.bevel
+    rings=[(0,c),(c,0),(t-c,0),(t,c)] if c else [(0,0),(t,0)]
+    r=getattr(p,'radius',0)
+    if 0<r<c:
+        rings=[(0,c),(c-r,r),(c,0),(t-c,0),(t-c+r,r),(t,c)]
+    verts=[]
+    for z,inset in rings:
+        if isinstance(p,CirclePlateParameters):
+            angles=np.linspace(0,2*np.pi,256,endpoint=False)
+            points=[(a/2+(a/2-inset)*np.cos(v),b/2+(b/2-inset)*np.sin(v),z) for v in angles]
+        else:
+            r=max(0,p.radius-inset)
+            centers=[(a-inset-r,b-inset-r),(inset+r,b-inset-r),(inset+r,inset+r),(a-inset-r,inset+r)]
+            points=[]
+            for i,(x,y) in enumerate(centers):
+                for angle in np.linspace(i*np.pi/2,(i+1)*np.pi/2,65):
+                    points.append((x+r*np.cos(angle),y+r*np.sin(angle),z))
+        verts.extend(points)
+    n=len(points);faces=[]
+    for j in range(len(rings)-1):
+        for i in range(n):
+            k=(i+1)%n;lo=j*n;hi=(j+1)*n
+            faces.extend([(lo+i,lo+k,hi+k),(lo+i,hi+k,hi+i)])
+    bottom=len(verts);verts.append((a/2,b/2,0))
+    top=len(verts);verts.append((a/2,b/2,t));start=(len(rings)-1)*n
+    for i in range(n):
+        k=(i+1)%n;faces.extend([(bottom,k,i),(top,start+i,start+k)])
+    mesh=trimesh.Trimesh(vertices=verts,faces=faces,process=True)
+    mesh.merge_vertices(digits_vertex=6);mesh.update_faces(mesh.nondegenerate_faces());mesh.remove_unreferenced_vertices()
+    check(mesh,1)
+    if not np.allclose(mesh.extents,[a,b,t],atol=.001,rtol=0):raise RuntimeError('平板尺寸检查失败。')
+    return mesh
+
+
+def plate_scad(p):
+    # Export the validated triangulation as an editable parametric ring loft.
+    a,b,t=plate_size(p)
+    dimensions=(f'diameter={a:g}; length=diameter; width=diameter;' if isinstance(p,CirclePlateParameters) else
+                (f'side={a:g}; length=side; width=side;' if isinstance(p,SquarePlateParameters) else f'length={a:g}; width={b:g};'))
+    return f'''// mm. R: plan-view corner radius. C: 45-degree top/bottom edge bevel.
+{dimensions} thickness={t:g};
+radius={getattr(p,'radius',0):g}; bevel={p.bevel:g};
+round_plate={'true' if isinstance(p,CirclePlateParameters) else 'false'};
+assert(min(length,width,thickness)>0);
+assert(radius>=0 && radius<=min(length,width)/2);
+assert(bevel>=0 && bevel<min(length,width,thickness)/2);
+function ring(z,d)=round_plate ?
+    [for(i=[0:255]) [length/2+(length/2-d)*cos(i*360/256),width/2+(width/2-d)*sin(i*360/256),z]] :
+    let(r=max(0,radius-d), centers=[[length-d-r,width-d-r],[d+r,width-d-r],[d+r,d+r],[length-d-r,d+r]])
+    [for(j=[0:3]) for(i=[0:64]) [centers[j][0]+r*cos(j*90+i*90/64),centers[j][1]+r*sin(j*90+i*90/64),z]];
+rings=bevel==0?[[0,0],[thickness,0]]:
+    (!round_plate && radius>0 && radius<bevel)?
+    [[0,bevel],[bevel-radius,radius],[bevel,0],[thickness-bevel,0],[thickness-bevel+radius,radius],[thickness,bevel]]:
+    [[0,bevel],[bevel,0],[thickness-bevel,0],[thickness,bevel]];
+n=round_plate?256:260; nr=len(rings);
+v=concat([for(pair=rings) each ring(pair[0],pair[1])],[[length/2,width/2,0],[length/2,width/2,thickness]]);
+faces=concat(
+ [for(j=[0:nr-2]) for(i=[0:n-1]) each [[j*n+i,j*n+(i+1)%n,(j+1)*n+(i+1)%n],[j*n+i,(j+1)*n+(i+1)%n,(j+1)*n+i]]],
+ [for(i=[0:n-1]) each [[nr*n,(i+1)%n,i],[nr*n+1,(nr-1)*n+i,(nr-1)*n+(i+1)%n]]]);
+// Weld collapsed corner vertices when R=0 or C>=R, then drop zero-area faces.
+vr=[for(p=v) [for(q=p) round(q*1000000)/1000000]];
+unique=[for(i=[0:len(vr)-1]) if(search([vr[i]],vr)[0]==i) vr[i]];
+mapped=[for(f=faces) [for(i=f) search([vr[i]],unique)[0]]];
+// OpenSCAD uses clockwise face winding viewed from outside.
+polyhedron(points=unique,faces=[for(f=mapped)
+    if(norm(cross(unique[f[1]]-unique[f[0]],unique[f[2]]-unique[f[0]]))>0.000000001)
+    [f[2],f[1],f[0]]],convexity=10);
+'''
+
+
+def generate_plate(p,destination):
+    import trimesh
+    import numpy as np
+    mesh=build_plate(p);destination=Path(destination).expanduser().resolve();destination.mkdir(parents=True,exist_ok=True)
+    mesh.export(destination/'plate_single.stl');reread=trimesh.load_mesh(destination/'plate_single.stl');check(reread,1)
+    if not np.allclose(reread.extents,plate_size(p),atol=.001,rtol=0):raise RuntimeError('平板导出尺寸不符。')
+    (destination/'plate_parametric.scad').write_text(plate_scad(p),encoding='utf-8')
+    (destination/'preview.html').write_text(preview_html(p,mesh),encoding='utf-8')
+    kind={RectPlateParameters:'rectangle',SquarePlateParameters:'square',CirclePlateParameters:'circle'}[type(p)]
+    report={'units':'mm','type':kind,'parameters':asdict(p),'outer_dimensions_mm':mesh.extents.tolist(),'single_closed':True,'components':[1],'volume_mm3':float(mesh.volume),'physically_print_tested':False}
+    (destination/'parameters.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+    (destination/'打印说明.txt').write_text(f'''实心平板，单位 mm。类型：{kind}，参数：{asdict(p)}。
+尺寸为成品最大外尺寸，不添加装配间隙。R 为俯视四角圆角，C 为上下周边 45 度倒角的水平/竖直退让量。
+C 必须小于板厚一半；倒角后中间直壁保持最大外形尺寸。圆形板没有四角圆角参数。
+圆形与圆角使用多边形近似，最大支持尺寸下轮廓弦高误差约 0.04 mm。
+按毫米、100% 比例导入切片软件，平放打印，检查底部倒角的悬空效果。先打印试配。
+已检查数字尺寸和网格，未做实物打印验证。输出 plate_single.stl、plate_parametric.scad 和 preview.html。
+''',encoding='utf-8')
+    return report
+
+
 def build_ucover(p):
     p.validate()
     import numpy as np
@@ -119,6 +262,7 @@ def build_cuboid(p):
 
 
 def build(p):
+    if isinstance(p,PLATES):return build_plate(p)
     if isinstance(p,UCoverParameters):return build_ucover(p)
     if isinstance(p,CuboidParameters):return build_cuboid(p)
     p.validate()
@@ -230,7 +374,10 @@ if(mode=="four") for(x=[0,arm+wall+6]) for(y=[0,arm+wall+6])
 
 def preview_html(p, mesh):
     data = json.dumps({'v':mesh.vertices.round(5).tolist(),'f':mesh.faces.tolist()}, separators=(',',':'))
-    text = (f'四周封闭盖板 · 内长 {p.length:g} · 内宽 {p.width:g} · 内高 {p.height:g} · 平板厚 {p.base:g} · 侧壁厚 {p.wall:g} mm'
+    labels=dict(diameter='直径',side='边长',length='长度',width='宽度',thickness='厚度',radius='圆角 R',bevel='倒角 C')
+    text = (('实心平板 · '+ ' · '.join(f'{labels[k]} {v:g}' for k,v in asdict(p).items())+' mm')
+            if isinstance(p,PLATES) else
+            f'四周封闭盖板 · 内长 {p.length:g} · 内宽 {p.width:g} · 内高 {p.height:g} · 平板厚 {p.base:g} · 侧壁厚 {p.wall:g} mm'
             if isinstance(p,ClosedCoverParameters) else
             f'U 形盖板 · 内宽 {p.width:g} · 长度 {p.length:g} · 侧壁内高 {p.height:g} · 平板厚 {p.base:g} · 侧壁厚 {p.wall:g} mm'
             if isinstance(p,UCoverParameters) else
@@ -278,6 +425,8 @@ document.getElementById('reset').onclick=()=>{a=.78;b=-.45;zoom=1;render()};wind
         template=template.replace('PCB 护角模型预览','U 形盖板预览').replace('PCB 四角护套','U 形盖板：两端开口').replace('边长指沿 PCB 每条边的延伸长度，不含外侧壁厚。此处显示单个护角，不含 PCB 和包装。先打印单件试配。','一块平板和两条相对侧壁，长度方向两端开口。内宽和内高均为净尺寸，不会额外增加装配间隙。')
     if isinstance(p,ClosedCoverParameters):
         template=template.replace('U 形盖板预览','四周封闭盖板预览').replace('U 形盖板：两端开口','四周封闭盖板：套入面开口').replace('一块平板和两条相对侧壁，长度方向两端开口。内宽和内高均为净尺寸，不会额外增加装配间隙。','一块平板和四周侧壁，仅套入面开口。内长、内宽、内高均为净尺寸，不额外增加装配间隙。')
+    if isinstance(p,PLATES):
+        template=template.replace('PCB 护角模型预览','实心平板预览').replace('PCB 四角护套','实心平板').replace('边长指沿 PCB 每条边的延伸长度，不含外侧壁厚。此处显示单个护角，不含 PCB 和包装。先打印单件试配。','R 为俯视四角圆角半径；C 为上下边缘 45° 倒角。尺寸为最大成品外尺寸。')
     return template.replace('__TEXT__',text).replace('__DATA__',data)
 
 
@@ -325,6 +474,7 @@ cover_single.stl 为单件；cover_parametric.scad 可修改；preview.html 可�
 
 
 def generate(p, destination):
+    if isinstance(p,PLATES):return generate_plate(p,destination)
     if isinstance(p,UCoverParameters):return generate_ucover(p,destination)
     mesh = build(p)
     import trimesh
@@ -401,9 +551,9 @@ corner_parametric.scad 是可编辑源文件；preview.html 可离线打开、�
 def gui():
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox
-    root=tk.Tk(); root.title('护角与盖板生成器 v1.3'); root.geometry('820x740'); root.minsize(800,720)
+    root=tk.Tk(); root.title('护角、盖板与平板生成器 v1.4'); root.geometry('1040x740'); root.minsize(1000,720)
     outer=ttk.Frame(root,padding=24); outer.pack(fill='both',expand=True)
-    ttk.Label(outer,text='护角与盖板生成器',font=('Microsoft YaHei UI',18,'bold')).pack(anchor='w')
+    ttk.Label(outer,text='护角、盖板与平板生成器',font=('Microsoft YaHei UI',18,'bold')).pack(anchor='w')
     ttk.Label(outer,text='选择结构类型，输入毫米尺寸，生成 STL 和可旋转预览。').pack(anchor='w',pady=(8,16))
     notebook=ttk.Notebook(outer);notebook.pack(fill='x')
     form=ttk.Frame(notebook,padding=12);notebook.add(form,text='PCB 夹槽护角')
@@ -439,17 +589,29 @@ def gui():
         ttk.Entry(closedform,textvariable=var,width=12).grid(row=row,column=1,padx=14)
         ttk.Label(closedform,text=hint).grid(row=row,column=2,sticky='w')
     ttk.Label(closedform,text='四周封闭，仅套入面开口；不额外添加装配间隙。').grid(row=5,column=0,columnspan=3,sticky='w',pady=10)
+    plateforms=[]
+    for cls,title,spec in [
+        (CirclePlateParameters,'圆形板',[('diameter','直径 D'),('thickness','厚度 T'),('bevel','边缘倒角 C')]),
+        (RectPlateParameters,'矩形板',[('length','长度 L'),('width','宽度 W'),('thickness','厚度 T'),('radius','四角圆角半径 R'),('bevel','边缘倒角 C')]),
+        (SquarePlateParameters,'方形板',[('side','边长 A'),('thickness','厚度 T'),('radius','四角圆角半径 R'),('bevel','边缘倒角 C')])]:
+        panel=ttk.Frame(notebook,padding=12);notebook.add(panel,text=title);values={}
+        for row,(key,label) in enumerate(spec):
+            ttk.Label(panel,text=label+' (mm)').grid(row=row,column=0,sticky='w',pady=7)
+            var=tk.StringVar(value=f'{getattr(cls(),key):g}');values[key]=var
+            ttk.Entry(panel,textvariable=var,width=12).grid(row=row,column=1,padx=14)
+        ttk.Label(panel,text='R / C 默认为 0。C 为上下周边 45° 倒角，须小于厚度一半。\nR 为俯视四角圆角半径，最大为短边的一半。圆形板无需 R。',wraplength=700).grid(row=len(spec),column=0,columnspan=3,sticky='w',pady=12)
+        plateforms.append((cls,values))
     def current():
-        cls,values=[(Parameters,fields),(CuboidParameters,cubefields),(UCoverParameters,ufields),(ClosedCoverParameters,closedfields)][notebook.index(notebook.select())]
+        cls,values=([(Parameters,fields),(CuboidParameters,cubefields),(UCoverParameters,ufields),(ClosedCoverParameters,closedfields)]+plateforms)[notebook.index(notebook.select())]
         p=cls(**{k:float(v.get()) for k,v in values.items()});p.validate();return p
     dims=tk.StringVar()
     def update(*_):
         try:
             p=current()
-            size=p.extents if isinstance(p,UCoverParameters) else ([p.x+p.wall,p.y+p.wall,p.z+p.wall] if isinstance(p,CuboidParameters) else [p.arm+p.wall,p.arm+p.wall,p.height])
+            size=plate_size(p) if isinstance(p,PLATES) else (p.extents if isinstance(p,UCoverParameters) else ([p.x+p.wall,p.y+p.wall,p.z+p.wall] if isinstance(p,CuboidParameters) else [p.arm+p.wall,p.arm+p.wall,p.height]))
             dims.set('单件外形：'+' × '.join(f'{v:g}' for v in size)+' mm')
         except ValueError: dims.set('请填写有效尺寸。')
-    for v in [*fields.values(),*cubefields.values(),*ufields.values(),*closedfields.values()]: v.trace_add('write',update)
+    for v in [*fields.values(),*cubefields.values(),*ufields.values(),*closedfields.values(),*[v for _,f in plateforms for v in f.values()]]: v.trace_add('write',update)
     notebook.bind('<<NotebookTabChanged>>',update)
     update();ttk.Label(outer,textvariable=dims).pack(anchor='w',pady=12)
     dest=tk.StringVar(value=str(Path(__file__).resolve().parent/'生成的模型'))
@@ -467,7 +629,7 @@ def gui():
             p=current()
             if not dest.get().strip():raise ValueError('请选择输出目录。')
             button.config(state='disabled'); status.set('正在生成并检查模型……');root.update_idletasks()
-            prefix='四周封闭盖板_' if isinstance(p,ClosedCoverParameters) else ('U形盖板_' if isinstance(p,UCoverParameters) else ('三面护角_' if isinstance(p,CuboidParameters) else 'PCB护角_'))
+            prefix=({CirclePlateParameters:'圆形板_',RectPlateParameters:'矩形板_',SquarePlateParameters:'方形板_'}[type(p)] if isinstance(p,PLATES) else ('四周封闭盖板_' if isinstance(p,ClosedCoverParameters) else ('U形盖板_' if isinstance(p,UCoverParameters) else ('三面护角_' if isinstance(p,CuboidParameters) else 'PCB护角_'))))
             path=Path(dest.get())/(prefix+datetime.now().strftime('%Y%m%d_%H%M%S_%f'))
             generate(p,path);last[0]=path.resolve();status.set(f'已生成并通过封闭性检查：{last[0]}')
             preview.config(state='normal')
@@ -483,9 +645,9 @@ def gui():
 
 
 def main():
-    ap=argparse.ArgumentParser(description='生成 PCB 护角、三面护角、U 形或四周封闭盖板 STL，单位 mm。无参数启动窗口。')
+    ap=argparse.ArgumentParser(description='生成护角、盖板、圆形/矩形/方形板 STL，单位 mm。无参数启动窗口。')
     ap.add_argument('--gui',action='store_true')
-    types={'pcb':Parameters,'cuboid':CuboidParameters,'ucover':UCoverParameters,'closedcover':ClosedCoverParameters}
+    types={'pcb':Parameters,'cuboid':CuboidParameters,'ucover':UCoverParameters,'closedcover':ClosedCoverParameters,'circle':CirclePlateParameters,'rectangle':RectPlateParameters,'square':SquarePlateParameters}
     allkeys=set().union(*(asdict(cls()) for cls in types.values()))
     ap.add_argument('--type',choices=list(types),default='pcb')
     for key in sorted(allkeys):

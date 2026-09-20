@@ -1,0 +1,22 @@
+{
+  "units": "mm",
+  "type": "rectangle",
+  "parameters": {
+    "length": 120.0,
+    "width": 100.0,
+    "thickness": 3.0,
+    "radius": 5.0,
+    "bevel": 0.5
+  },
+  "outer_dimensions_mm": [
+    120.0,
+    100.0,
+    3.0
+  ],
+  "single_closed": true,
+  "components": [
+    1
+  ],
+  "volume_mm3": 35828.004373796866,
+  "physically_print_tested": false
+}

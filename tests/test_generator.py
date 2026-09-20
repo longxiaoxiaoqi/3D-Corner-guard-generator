@@ -115,6 +115,30 @@ for index,p in enumerate([g.ClosedCoverParameters(),g.ClosedCoverParameters(leng
     print('PASS four-wall cover, inner dimensions and open insertion face',index)
 del solid,probe
 
+platecases=[g.RectPlateParameters(),g.RectPlateParameters(radius=5,bevel=.5),
+            g.RectPlateParameters(length=30,width=10,radius=5,bevel=.5),
+            g.RectPlateParameters(radius=.2,bevel=1),g.RectPlateParameters(radius=0,bevel=.5),
+            g.SquarePlateParameters(radius=50,bevel=.5),g.SquarePlateParameters(side=10,thickness=1,bevel=.49),
+            g.CirclePlateParameters(),g.CirclePlateParameters(bevel=.5)]
+for index,p in enumerate(platecases):
+    d=ROOT/'test-output'/f'plate{index}';g.generate(p,d)
+    mesh=trimesh.load_mesh(d/'plate_single.stl');a,b,t=g.plate_size(p)
+    assert np.allclose(mesh.extents,[a,b,t],atol=.001)
+    solid=m.Manifold(m.Mesh(np.asarray(mesh.vertices,dtype=np.float32),np.asarray(mesh.faces,dtype=np.uint32)))
+    for z in [t*.01,t*.15,t*.5,t*.85,t*.99]:
+        inset=max(0,p.bevel-min(z,t-z))
+        area=(np.pi*(a/2-inset)**2 if isinstance(p,g.CirclePlateParameters) else
+              (a-2*inset)*(b-2*inset)-(4-np.pi)*max(0,p.radius-inset)**2)
+        assert abs(solid.slice(z).area()-area)<max(.001,area*.00015),(index,z)
+    print('PASS plate dimensions and 45-degree bevel sections',index)
+del solid
+for p in [g.RectPlateParameters(radius=51),g.RectPlateParameters(bevel=1.5),
+          g.CirclePlateParameters(bevel=-1),g.SquarePlateParameters(radius=float('nan'))]:
+    try:p.validate()
+    except ValueError:pass
+    else:raise AssertionError('Invalid plate parameters accepted')
+print('PASS invalid plate parameters rejected')
+
 # Exercise the actual GUI generate button without displaying a desktop window.
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -126,7 +150,7 @@ def smoke(root):
             yield from widgets(child)
     items=list(widgets(root))
     entries=[x for x in items if isinstance(x,ttk.Entry)]
-    assert len(entries)==21
+    assert len(entries)==33
     entries[-1].delete(0,'end');entries[-1].insert(0,str(ROOT/'test-output/gui'))
     button=next(x for x in items if isinstance(x,ttk.Button) and x.cget('text')=='生成模型')
     preview=next(x for x in items if isinstance(x,ttk.Button) and x.cget('text')=='打开 3D 预览')
@@ -148,6 +172,10 @@ def smoke(root):
     import json
     reports=[json.loads(f.read_text(encoding='utf-8')) for f in (ROOT/'test-output/gui').glob('*/parameters.json')]
     assert any(r.get('type')=='closedcover' for r in reports)
+    for index,kind in [(4,'circle'),(5,'rectangle'),(6,'square')]:
+        notebook.select(index);button.invoke()
+        reports=[json.loads(f.read_text(encoding='utf-8')) for f in (ROOT/'test-output/gui').glob('*/parameters.json')]
+        assert any(r.get('type')==kind for r in reports)
     root.destroy()
 tk.Tk.mainloop=smoke
 g.gui()

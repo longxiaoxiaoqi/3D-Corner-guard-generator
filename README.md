@@ -1,4 +1,35 @@
-# 护角与盖板生成器
+# 护角、盖板与平板生成器
+
+**v1.4.0 新增圆形板、矩形板、方形板，共七种类型。** 矩形和方形支持四角圆角 R，三种平板都支持上下边缘倒角 C；不会改变原有护角和盖板结构。
+
+## 圆形、矩形与方形实心板
+
+| 类型 | 基本参数（mm） | 可选参数 |
+| --- | --- | --- |
+| 圆形板 | 直径 D、厚度 T | 上下边缘倒角 C |
+| 矩形板 | 长度 L、宽度 W、厚度 T | 四角圆角 R、上下边缘倒角 C |
+| 方形板 | 边长 A、厚度 T | 四角圆角 R、上下边缘倒角 C |
+
+R 和 C 默认均为 0。R 改变俯视轮廓四角；C 同时削去上、下周边，角度为 45°，水平及竖直退让量各为 C。参数是成品最大外尺寸，倒角后中间直壁仍保持该尺寸。
+
+- R 不超过短边一半，允许等于一半（方形变为圆形轮廓，矩形变为胶囊轮廓）。
+- C 必须小于板厚的一半，并小于短边/直径的一半，以保留中间直壁。
+- 支持 R 与 C 同时使用，以及 R 小于 C 的情况；输入不合法会明确报错。
+- 圆形没有四角圆角 R；三种平板暂不含孔洞。
+
+```powershell
+python program/corner_guard.py --type circle --diameter 100 --thickness 3 --bevel 0.5 --out ./circle-model
+python program/corner_guard.py --type rectangle --length 120 --width 100 --thickness 3 --radius 5 --bevel 0.5 --out ./rectangle-model
+python program/corner_guard.py --type square --side 100 --thickness 3 --radius 5 --bevel 0.5 --out ./square-model
+```
+
+窗口中选择对应平板类型即可。输出 `plate_single.stl`、`plate_parametric.scad`、可旋转 `preview.html`、参数和打印说明。曲线使用多边形近似，在最大支持尺寸下弦高误差约 0.04 mm。平放切片，检查下边缘倒角的悬空效果。
+
+技能示例：
+
+> 用 $pcb-corner-guard 生成矩形板：长 120、宽 100、厚 3，四角圆角 R=5，上下边缘倒角 C=0.5 mm。
+
+示例：[圆形板](examples/circle) · [矩形板](examples/rectangle) · [方形板](examples/square)。
 
 **v1.3.0 新增四周封闭盖板**，现支持 PCB 护角、三面护角、U 形盖板、四周封闭盖板四种类型。
 
@@ -215,12 +246,15 @@ Copy-Item -Recurse -Path ./skills/pcb-corner-guard -Destination $skillBase
 ## 仓库结构与验证
 
 ```text
-program/                    四种类型的参数窗口与命令行程序
+program/                    七种类型的参数窗口与命令行程序
 skills/pcb-corner-guard/     可复制安装的完整技能
 examples/default/           默认参数示例和装配图
 examples/cuboid/            三面护角示例、八件排版和预览图
 examples/ucover/            两端开口 U 形盖板示例和预览图
 examples/closedcover/       四周封闭盖板示例和预览图
+examples/circle/            圆形板示例
+examples/rectangle/         圆角矩形板示例
+examples/square/            方形板示例
 tests/test_generator.py     几何、非法输入及窗口生成测试
 ```
 
@@ -230,6 +264,6 @@ tests/test_generator.py     几何、非法输入及窗口生成测试
 python tests/test_generator.py
 ```
 
-测试覆盖四组 PCB 尺寸、三组三面护角尺寸、三组 U 形盖板和三组四周封闭盖板尺寸；包括独立截面与体积、开口及四周侧壁、镜像排版、非法参数，以及四种类型的窗口生成按钮。测试输出写入已忽略的 `test-output/`。
+测试覆盖 22 组几何参数，包括平板尖角、圆角、上下倒角、R<C、最大圆角和接近厚度上限的倒角；同时检查原有护角、盖板、非法输入及七种类型的窗口生成按钮。测试输出写入已忽略的 `test-output/`。
 
 程序和技能各自携带生成器，方便单独分发；修改生成逻辑后，请同步 `program/corner_guard.py` 和 `skills/pcb-corner-guard/scripts/corner_guard.py`，同时保持依赖文件一致。

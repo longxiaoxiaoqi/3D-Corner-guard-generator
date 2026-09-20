@@ -1,0 +1,20 @@
+{
+  "units": "mm",
+  "type": "circle",
+  "parameters": {
+    "diameter": 100.0,
+    "thickness": 3.0,
+    "bevel": 0.5
+  },
+  "outer_dimensions_mm": [
+    100.0,
+    100.0,
+    3.0
+  ],
+  "single_closed": true,
+  "components": [
+    1
+  ],
+  "volume_mm3": 23481.309223826724,
+  "physically_print_tested": false
+}
